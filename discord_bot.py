@@ -9,18 +9,32 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("discord_bot")
+
 intents = discord.Intents.default()
+# En producción no necesitamos message content intent para slash commands
+intents.message_content = False
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
 async def on_ready():
-    print(f"✅ Bot conectado: {bot.user}")
+    logger.info(f"✅ Bot conectado: {bot.user}")
+    # Si se proporciona GUILD_ID en env, sincronizamos los comandos en ese guild
+    guild_id = os.getenv("GUILD_ID")
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ {len(synced)} comando(s) sincronizado(s)")
+        if guild_id:
+            guild = discord.Object(id=int(guild_id))
+            synced = await bot.tree.sync(guild=guild)
+            logger.info(f"✅ {len(synced)} comando(s) sincronizado(s) en guild {guild_id}")
+        else:
+            synced = await bot.tree.sync()
+            logger.info(f"✅ {len(synced)} comando(s) sincronizado(s) globalmente")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.exception(f"❌ Error sincronizando comandos: {e}")
 
 
 @bot.tree.command(name="stats", description="Obtener stats de un jugador de Valorant")
@@ -65,6 +79,13 @@ async def regiones(interaction: discord.Interaction):
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
-        print("❌ DISCORD_TOKEN no configurada en .env")
+        logger.error("DISCORD_TOKEN no configurada en environment")
+        print("❌ DISCORD_TOKEN no configurada en environment")
     else:
-        bot.run(DISCORD_TOKEN)
+        try:
+            logger.info("Iniciando bot de Discord...")
+            bot.run(DISCORD_TOKEN)
+        except Exception as e:
+            logger.exception(f"Error al ejecutar el bot: {e}")
+            # asegúrate de que Railway capture el error en logs
+            print(f"Error al ejecutar el bot: {e}")
