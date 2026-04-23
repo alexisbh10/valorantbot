@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime
 
-VALORANT_API = "https://valorant-api.com/v1"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 app = FastAPI()
@@ -15,8 +14,7 @@ def obtener_stats(username: str, tag: str) -> dict:
     """Obtiene stats del jugador desde valorant-api.com"""
     try:
         response = requests.get(
-            f"{VALORANT_API}/accounts",
-            params={"search": f"{username}#{tag}"},
+            f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}",
             timeout=10
         )
         response.raise_for_status()
@@ -25,7 +23,7 @@ def obtener_stats(username: str, tag: str) -> dict:
         if not data.get("data"):
             raise ValueError(f"Jugador no encontrado: {username}#{tag}")
         
-        player = data["data"][0]
+        player = data["data"]
         return {
             "nombre": player.get("name", "N/A"),
             "tag": player.get("tag", "N/A"),
