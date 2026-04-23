@@ -119,7 +119,19 @@ def obtener_stats(username, tag, region="eu"):
         f"https://api.henrikdev.xyz/valorant/v2/mmr/{region}/{username}/{tag}",
         headers
     )
-    mmr = mmr_json.get("data") or {}
+
+    mmr_data = mmr_json.get("data")
+
+    if not isinstance(mmr_data, dict):
+        mmr_data = {}
+
+    rank = (
+        mmr_data.get("currenttierpatched")
+        or mmr_data.get("currenttier")
+        or "Unranked"
+    )
+
+    rr = mmr_data.get("ranking_in_tier", 0)
 
     # MATCHES
     match_json = safe_get(
