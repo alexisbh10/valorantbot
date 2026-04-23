@@ -6,6 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL", "")
+HENRIK_API_KEY = os.getenv("HENRIK_API_KEY")
 
 app = FastAPI()
 
@@ -13,8 +14,13 @@ app = FastAPI()
 def obtener_stats(username: str, tag: str) -> dict:
     """Obtiene stats del jugador desde valorant-api.com"""
     try:
+        headers = {
+            "Authorization": HENRIK_API_KEY
+        }
+
         response = requests.get(
             f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}",
+            headers=headers,
             timeout=10
         )
         response.raise_for_status()
