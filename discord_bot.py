@@ -19,15 +19,12 @@ async def on_ready():
     print(f"✅ Bot listo: {bot.user}")
     await bot.tree.sync()
 
-# ---------------- SAFE GET ----------------
+# ---------------- SAFE ----------------
 def safe(v, default="N/A"):
-    return v if v is not None else default
+    return default if v is None else v
 
-# ---------------- STATS ----------------
-@bot.tree.command(name="stats")
-async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
-    await interaction.response.defer()
-
+# ---------------- REQUEST WRAPPER ----------------
+def fetch_stats(nombre, tag, region="eu"):
     try:
         r = requests.post(
             f"{TRACKER_URL.rstrip('/')}/tracker",
@@ -42,26 +39,36 @@ async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
         data = r.json()
 
         if not data.get("success"):
-            await interaction.followup.send(f"❌ Error: {data.get('error', 'desconocido')}")
-            return
+            return None, data.get("error", "unknown error")
 
-        s = data["stats"]
-
-        embed = discord.Embed(
-            title=f"{safe(s.get('nombre'))}#{safe(s.get('tag'))}",
-            color=0xFF4655
-        )
-
-        embed.add_field(name="🎮 Nivel", value=safe(s.get("nivel")), inline=True)
-        embed.add_field(name="🏆 Rank", value=safe(s.get("rank", "Unranked")), inline=True)
-        embed.add_field(name="📈 RR", value=safe(s.get("rr", 0)), inline=True)
-        embed.add_field(name="🗺️ Mapa", value=safe(s.get("mapa")), inline=True)
-        embed.add_field(name="🎯 Modo", value=safe(s.get("modo")), inline=True)
-
-        await interaction.followup.send(embed=embed)
+        return data.get("stats", {}), None
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Error: {str(e)}")
+        return None, str(e)
+
+# ---------------- STATS ----------------
+@bot.tree.command(name="stats")
+async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
+    await interaction.response.defer()
+
+    s, err = fetch_stats(nombre, tag, region)
+
+    if err:
+        await interaction.followup.send(f"❌ Error: {err}")
+        return
+
+    embed = discord.Embed(
+        title=f"{safe(s.get('nombre'))}#{safe(s.get('tag'))}",
+        color=0xFF4655
+    )
+
+    embed.add_field(name="🎮 Nivel", value=safe(s.get("nivel")), inline=True)
+    embed.add_field(name="🏆 Rank", value=safe(s.get("rank", "Unranked")), inline=True)
+    embed.add_field(name="📈 RR", value=safe(s.get("rr", 0)), inline=True)
+    embed.add_field(name="🗺️ Mapa", value=safe(s.get("mapa")), inline=True)
+    embed.add_field(name="🎯 Modo", value=safe(s.get("modo")), inline=True)
+
+    await interaction.followup.send(embed=embed)
 
 # ---------------- FRIENDS ----------------
 friends = {}
@@ -69,10 +76,7 @@ friends = {}
 @bot.tree.command(name="add")
 async def add(interaction, nombre: str, tag: str):
     uid = interaction.user.id
-
-    friends.setdefault(uid, [])
-    friends[uid].append((nombre, tag))
-
+    friends.setdefault(uid, []).append((nombre, tag))
     await interaction.response.send_message("✔ Añadido")
 
 # ---------------- FRIENDS LIST ----------------
@@ -85,35 +89,35 @@ async def friends_cmd(interaction):
         return
 
     text = "\n".join([f"{n}#{t}" for n, t in friends[uid]])
-
     await interaction.response.send_message(f"👥 Amigos:\n{text}")
 
 # ---------------- COMPARE ----------------
 @bot.tree.command(name="compare")
 async def compare(interaction, p1: str, t1: str, p2: str, t2: str):
-    try:
-        r1 = requests.post(f"{TRACKER_URL}/tracker", json={"username": p1, "tag": t1}).json()
-        r2 = requests.post(f"{TRACKER_URL}/tracker", json={"username": p2, "tag": t2}).json()
+    await interaction.response.defer()
 
-        a = r1.get("stats", {})
-        b = r2.get("stats", {})
+    s1, e1 = fetch_stats(p1, t1)
+    s2, e2 = fetch_stats(p2, t2)
 
-        embed = discord.Embed(title="⚔️ Compare")
+    if e1 or e2:
+        await interaction.followup.send(f"❌ Error: {e1 or e2}")
+        return
 
-        embed.add_field(
-            name=safe(a.get("nombre")),
-            value=f"{safe(a.get('rank'))} | {safe(a.get('rr', 0))} RR"
-        )
+    embed = discord.Embed(title="⚔️ Compare", color=0xFF4655)
 
-        embed.add_field(
-            name=safe(b.get("nombre")),
-            value=f"{safe(b.get('rank'))} | {safe(b.get('rr', 0))} RR"
-        )
+    embed.add_field(
+        name=safe(s1.get("nombre")),
+        value=f"{safe(s1.get('rank'))} | {safe(s1.get('rr', 0))} RR",
+        inline=True
+    )
 
-        await interaction.response.send_message(embed=embed)
+    embed.add_field(
+        name=safe(s2.get("nombre")),
+        value=f"{safe(s2.get('rank'))} | {safe(s2.get('rr', 0))} RR",
+        inline=True
+    )
 
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error: {str(e)}")
+    await interaction.followup.send(embed=embed)
 
 # ---------------- LEADERBOARD ----------------
 @bot.tree.command(name="leaderboard")
@@ -124,33 +128,30 @@ async def leaderboard(interaction):
         await interaction.response.send_message("Sin amigos")
         return
 
+    await interaction.response.defer()
+
     scores = []
 
     for n, t in friends[uid]:
-        try:
-            r = requests.post(
-                f"{TRACKER_URL}/tracker",
-                json={"username": n, "tag": t}
-            ).json()
+        s, err = fetch_stats(n, t)
 
-            s = r.get("stats", {})
-            scores.append((
-                n,
-                s.get("rr", 0),
-                s.get("rank", "Unranked")
-            ))
-
-        except:
+        if err or not s:
             continue
+
+        scores.append((
+            n,
+            s.get("rr", 0),
+            s.get("rank", "Unranked")
+        ))
 
     scores.sort(key=lambda x: x[1], reverse=True)
 
     text = "\n".join([
         f"🏆 {n} - {rr} RR ({rk})"
         for n, rr, rk in scores
-    ])
+    ]) or "Sin datos"
 
-    await interaction.response.send_message(text)
+    await interaction.followup.send(text)
 
 # ---------------- RUN ----------------
 bot.run(TOKEN)
