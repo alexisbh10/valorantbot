@@ -114,14 +114,13 @@ def obtener_stats(username, tag, region="eu"):
     )
     acc = acc_json.get("data") or {}
 
-    # MMR
+    # ---------------- MMR (FIX REAL) ----------------
     mmr_json = safe_get(
         f"https://api.henrikdev.xyz/valorant/v2/mmr/{region}/{username}/{tag}",
         headers
     )
 
     mmr_data = mmr_json.get("data")
-
     if not isinstance(mmr_data, dict):
         mmr_data = {}
 
@@ -131,18 +130,24 @@ def obtener_stats(username, tag, region="eu"):
         or "Unranked"
     )
 
-    rr = mmr_data.get("ranking_in_tier", 0)
+    rr = mmr_data.get("ranking_in_tier") or 0
 
-    # MATCHES
+    # ---------------- MATCHES (FIX REAL) ----------------
     match_json = safe_get(
         f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}",
         headers
     )
-    matches = match_json.get("data") or []
 
-    last = matches[0] if matches else None
+    matches = match_json.get("data")
+    if not isinstance(matches, list):
+        matches = []
 
-    # ANALYTICS
+    last = matches[0] if matches else {}
+
+    mapa = last.get("metadata", {}).get("map", "N/A")
+    modo = last.get("metadata", {}).get("mode", "N/A")
+
+    # ---------------- ANALYTICS ----------------
     analysis = analyze_matches(matches)
     elo = calculate_elo(matches)
 
@@ -153,24 +158,24 @@ def obtener_stats(username, tag, region="eu"):
         "nivel": acc.get("account_level", 0),
 
         # RANK
-        "rank": mmr.get("currenttierpatched", "Unranked"),
-        "rr": mmr.get("ranking_in_tier", 0),
+        "rank": rank,
+        "rr": rr,
 
         # LAST MATCH
-        "mapa": last["metadata"]["map"] if last else "N/A",
-        "modo": last["metadata"]["mode"] if last else "N/A",
+        "mapa": mapa,
+        "modo": modo,
 
         # LEVEL 1
-        "kda": analysis["kda"],
-        "winrate": analysis["winrate"],
+        "kda": analysis.get("kda", 0),
+        "winrate": analysis.get("winrate", 0),
 
         # LEVEL 2
         "elo": elo,
-        "trend": analysis["trend"],
-        "consistency": analysis["consistency"],
+        "trend": analysis.get("trend", "UNKNOWN"),
+        "consistency": analysis.get("consistency", 0),
 
         # LEVEL 3
-        "smurf": smurf_detect(elo, mmr.get("currenttierpatched", ""))
+        "smurf": smurf_detect(elo, rank)
     }
 
     set_cache(key, stats)
