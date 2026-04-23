@@ -30,42 +30,95 @@ def safe_get(url, headers):
         return {}
 
 # ---------------- LEVEL 1 + 2 + 3 ANALYTICS ----------------
-def analyze_matches(matches):
+def analyze_matches(matches, username, tag):
     if not matches:
         return {
             "kda": 0,
             "winrate": 0,
             "trend": "UNKNOWN",
-            "consistency": 0
+            "consistency": 0,
+            "hs": 0,
+            "adr": 0,
+            "acs": 0
         }
 
     kills, deaths, wins = 0, 0, 0
+    headshots, bodyshots, legshots = 0, 0, 0
+    damage, rounds, score = 0, 0, 0
+
     kdas = []
     total = 0
 
     for m in matches[:10]:
-
         players = m.get("players", {}).get("all_players", [])
 
-        k = 0
-        d = 1
+        player = None
 
+        # 🔥 BUSCAR JUGADOR CORRECTO
         for p in players:
-            stats = p.get("stats", {})
-            k = stats.get("kills", 0)
-            d = stats.get("deaths", 1)
-            break
+            if (
+                p.get("name", "").lower() == username.lower()
+                and p.get("tag", "").lower() == tag.lower()
+            ):
+                player = p
+                break
 
-        kdas.append(k / max(d, 1))
+        if not player:
+            continue
+
+        stats = player.get("stats", {})
+        dmg = player.get("damage_made", 0)
+
+        k = stats.get("kills", 0)
+        d = stats.get("deaths", 1)
+
+        hs = stats.get("headshots", 0)
+        bs = stats.get("bodyshots", 0)
+        ls = stats.get("legshots", 0)
+
+        r = m.get("metadata", {}).get("rounds_played", 1)
+        sc = stats.get("score", 0)
+
+        # acumulados
         kills += k
         deaths += d
+        headshots += hs
+        bodyshots += bs
+        legshots += ls
+        damage += dmg
+        rounds += r
+        score += sc
 
-        if m.get("teams", {}).get("red", {}).get("has_won"):
+        kdas.append(k / max(d, 1))
+
+        # win check correcto
+        team = player.get("team")
+        if m.get("teams", {}).get(team, {}).get("has_won"):
             wins += 1
 
         total += 1
 
-    # TREND (simple)
+    if total == 0:
+        return {
+            "kda": 0,
+            "winrate": 0,
+            "trend": "UNKNOWN",
+            "consistency": 0,
+            "hs": 0,
+            "adr": 0,
+            "acs": 0
+        }
+
+    total_shots = headshots + bodyshots + legshots
+
+    # 📊 métricas reales
+    kda = round(kills / max(deaths, 1), 2)
+    winrate = round((wins / total) * 100, 1)
+    hs_percent = round((headshots / max(total_shots, 1)) * 100, 1)
+    adr = round(damage / max(rounds, 1), 1)
+    acs = round(score / max(rounds, 1), 1)
+
+    # 📈 trend
     trend = "STABLE"
     if len(kdas) >= 5:
         if kdas[-1] > kdas[0]:
@@ -74,23 +127,14 @@ def analyze_matches(matches):
             trend = "DECLINING"
 
     return {
-        "kda": round(kills / max(deaths, 1), 2),
-        "winrate": round((wins / max(total, 1)) * 100, 1),
+        "kda": kda,
+        "winrate": winrate,
         "trend": trend,
-        "consistency": round(max(kdas) - min(kdas), 2) if kdas else 0
+        "consistency": round(max(kdas) - min(kdas), 2),
+        "hs": hs_percent,
+        "adr": adr,
+        "acs": acs
     }
-
-# ---------------- ELO SYSTEM (LEVEL 2) ----------------
-def calculate_elo(matches):
-    elo = 1000
-
-    for m in matches[:20]:
-        if m.get("teams", {}).get("red", {}).get("has_won"):
-            elo += 15
-        else:
-            elo -= 10
-
-    return max(0, elo)
 
 # ---------------- SMURF DETECTION ----------------
 def smurf_detect(elo, rank):
@@ -148,7 +192,7 @@ def obtener_stats(username, tag, region="eu"):
     modo = last.get("metadata", {}).get("mode", "N/A")
 
     # ---------------- ANALYTICS ----------------
-    analysis = analyze_matches(matches)
+    analysis = analyze_matches(matches, username, tag)    
     elo = calculate_elo(matches)
 
     stats = {
@@ -165,14 +209,16 @@ def obtener_stats(username, tag, region="eu"):
         "mapa": mapa,
         "modo": modo,
 
-        # LEVEL 1
-        "kda": analysis.get("kda", 0),
-        "winrate": analysis.get("winrate", 0),
+       # LEVEL 1+
+        "kda": analysis["kda"],
+        "winrate": analysis["winrate"],
+        "hs": analysis["hs"],
+        "adr": analysis["adr"],
+        "acs": analysis["acs"],
 
         # LEVEL 2
-        "elo": elo,
-        "trend": analysis.get("trend", "UNKNOWN"),
-        "consistency": analysis.get("consistency", 0),
+        "trend": analysis["trend"],
+        "consistency": analysis["consistency"],
 
         # LEVEL 3
         "smurf": smurf_detect(elo, rank)
@@ -195,6 +241,9 @@ def crear_embed(s):
             {"name": "📈 RR", "value": str(s["rr"]), "inline": True},
 
             {"name": "📊 KDA", "value": str(s["kda"]), "inline": True},
+            {"name": "🎯 HS%", "value": f"{s['hs']}%", "inline": True},
+            {"name": "💥 ADR", "value": str(s["adr"]), "inline": True},
+            {"name": "⚔️ ACS", "value": str(s["acs"]), "inline": True},
             {"name": "📈 Winrate", "value": f"{s['winrate']}%", "inline": True},
 
             {"name": "🧠 ELO", "value": str(s["elo"]), "inline": True},
