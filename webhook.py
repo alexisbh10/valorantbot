@@ -67,7 +67,11 @@ def analyze_matches(matches, username, tag):
             continue
 
         stats = player.get("stats", {})
-        dmg = player.get("damage_made", 0)
+        dmg = (
+            player.get("damage_made")
+            or stats.get("damage_made")
+            or 0
+        )
 
         k = stats.get("kills", 0)
         d = stats.get("deaths", 1)
@@ -93,8 +97,10 @@ def analyze_matches(matches, username, tag):
 
         # win check correcto
         team = player.get("team")
-        if m.get("teams", {}).get(team, {}).get("has_won"):
-            wins += 1
+        teams = m.get("teams", {})
+        if team and isinstance(teams, dict):
+            if teams.get(team, {}).get("has_won"):
+                wins += 1
 
         total += 1
 
@@ -135,6 +141,25 @@ def analyze_matches(matches, username, tag):
         "adr": adr,
         "acs": acs
     }
+
+def calculate_elo(matches):
+    elo = 1000
+
+    for m in matches[:20]:
+        if not isinstance(m, dict):
+            continue
+
+        teams = m.get("teams", {})
+        if not isinstance(teams, dict):
+            continue
+
+        red = teams.get("red", {})
+        if red.get("has_won"):
+            elo += 15
+        else:
+            elo -= 10
+
+    return max(0, elo)
 
 # ---------------- SMURF DETECTION ----------------
 def smurf_detect(elo, rank):
@@ -219,6 +244,7 @@ def obtener_stats(username, tag, region="eu"):
         # LEVEL 2
         "trend": analysis["trend"],
         "consistency": analysis["consistency"],
+        "elo": elo,
 
         # LEVEL 3
         "smurf": smurf_detect(elo, rank)
