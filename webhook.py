@@ -85,7 +85,7 @@ def enviar_discord(embed: dict, user_id: Optional[str] = None) -> bool:
         return False
 
 
-@app.post("/tracker")
+@app.post("tracker")
 async def tracker(request: Request):
     """Obtiene stats de Valorant y las envía a Discord
     
