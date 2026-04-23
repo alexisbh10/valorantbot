@@ -38,13 +38,13 @@ async def on_ready():
 
 
 @bot.tree.command(name="stats", description="Obtener stats de un jugador de Valorant")
-async def stats(interaction: discord.Interaction, nombre: str, region: str = "NA1"):
+async def stats(interaction: discord.Interaction, nombre: str, region: str = "EUW1"):
     """Obtiene stats: /stats Nombre NA1"""
     await interaction.response.defer()
     
     try:
         response = requests.post(
-            f"{TRACKER_URL}/tracker",
+            url = f"{TRACKER_URL.rstrip('/')}/tracker",
             json={"username": nombre, "tag": region, "discord_user_id": str(interaction.user.id)},
             timeout=10
         )
