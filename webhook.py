@@ -1,137 +1,105 @@
 import requests
 import os
+import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from typing import Optional
 from datetime import datetime
-
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL", "")
-HENRIK_API_KEY = os.getenv("HENRIK_API_KEY")
 
 app = FastAPI()
 
+HENRIK_API_KEY = os.getenv("HENRIK_API_KEY")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
-def obtener_stats(username: str, tag: str) -> dict:
-    """Obtiene stats del jugador desde valorant-api.com"""
-    try:
-        headers = {
-            "Authorization": HENRIK_API_KEY
-        }
+cache = {}
 
-        response = requests.get(
-            f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}",
-            headers=headers,
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-        
-        if not data.get("data"):
-            raise ValueError(f"Jugador no encontrado: {username}#{tag}")
-        
-        player = data["data"]
-        return {
-            "nombre": player.get("name", "N/A"),
-            "tag": player.get("tag", "N/A"),
-            "nivel": player.get("account_level", "N/A"),
-            "ultima_actualizacion": player.get("last_update", "N/A")
-        }
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error API Valorant: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# ---------------- CACHE ----------------
+def get_cache(k):
+    if k in cache:
+        data, ts = cache[k]
+        if time.time() - ts < 60:
+            return data
+    return None
 
+def set_cache(k, v):
+    cache[k] = (v, time.time())
 
-def crear_embed(stats: dict) -> dict:
-    """Crea un embed de Discord con las stats"""
-    return {
-        "title": f"📊 Estadísticas de {stats['nombre']}",
-        "description": f"Tag: `{stats['tag']}`",
-        "color": 16711680,
-        "fields": [
-            {
-                "name": "🎮 Nivel de Cuenta",
-                "value": str(stats['nivel']),
-                "inline": True
-            },
-            {
-                "name": "🔄 Última Actualización",
-                "value": stats['ultima_actualizacion'] or "N/A",
-                "inline": True
-            }
-        ],
-        "timestamp": datetime.utcnow().isoformat(),
-        "footer": {"text": "Valorant Tracker"}
+# ---------------- CORE STATS ----------------
+def obtener_stats(username, tag, region="eu"):
+    key = f"{username}{tag}"
+    cached = get_cache(key)
+    if cached:
+        return cached
+
+    headers = {"Authorization": HENRIK_API_KEY}
+
+    acc = requests.get(
+        f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}",
+        headers=headers
+    ).json()["data"]
+
+    mmr = requests.get(
+        f"https://api.henrikdev.xyz/valorant/v2/mmr/{region}/{username}/{tag}",
+        headers=headers
+    ).json()["data"]
+
+    matches = requests.get(
+        f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}",
+        headers=headers
+    ).json()["data"]
+
+    last = matches[0]
+
+    stats = {
+        "nombre": acc["name"],
+        "tag": acc["tag"],
+        "nivel": acc["account_level"],
+
+        "rank": mmr["currenttierpatched"],
+        "rr": mmr["ranking_in_tier"],
+
+        "mapa": last["metadata"]["map"],
+        "modo": last["metadata"]["mode"]
     }
 
+    set_cache(key, stats)
+    return stats
 
-def enviar_discord(embed: dict, user_id: Optional[str] = None) -> bool:
-    """Envía el embed a Discord"""
-    if not DISCORD_WEBHOOK:
-        return False
-    
-    try:
-        payload = {
-            "embeds": [embed],
-            "username": "Valorant Tracker"
-        }
-        if user_id:
-            payload["content"] = f"<@{user_id}>"
-        
-        response = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception:
-        return False
+# ---------------- DISCORD EMBED ----------------
+def crear_embed(s):
+    return {
+        "title": f"📊 {s['nombre']}#{s['tag']}",
+        "color": 0xFF4655,
+        "fields": [
+            {"name": "🎮 Nivel", "value": s["nivel"], "inline": True},
+            {"name": "🏆 Rank", "value": s["rank"], "inline": True},
+            {"name": "📈 RR", "value": s["rr"], "inline": True},
+            {"name": "🗺️ Mapa", "value": s["mapa"], "inline": True},
+            {"name": "🎯 Modo", "value": s["modo"], "inline": True},
+        ],
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
-
+# ---------------- ENDPOINT ----------------
 @app.post("/tracker")
 async def tracker(request: Request):
-    """Obtiene stats de Valorant y las envía a Discord
-    
-    JSON esperado:
-    {
-        "username": "nombre",
-        "tag": "NA1",
-        "discord_user_id": "123..." (opcional)
-    }
-    """
-    try:
-        body = await request.json()
-        username = body.get("username")
-        tag = body.get("tag")
-        user_id = body.get("discord_user_id")
-        
-        if not username or not tag:
-            raise HTTPException(status_code=400, detail="username y tag requeridos")
-        
-        stats = obtener_stats(username, tag)
-        embed = crear_embed(stats)
-        enviado = enviar_discord(embed, user_id)
-        
-        return {
-            "success": True,
-            "stats": stats,
-            "discord_enviado": enviado
-        }
-    except HTTPException as e:
-        return JSONResponse(
-            status_code=e.status_code,
-            content={"success": False, "error": e.detail}
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)}
-        )
+    body = await request.json()
 
+    username = body.get("username")
+    tag = body.get("tag")
+    region = body.get("region", "eu")
+    user_id = body.get("discord_user_id")
+
+    if not username or not tag:
+        raise HTTPException(status_code=400, detail="username y tag requeridos")
+
+    stats = obtener_stats(username, tag, region)
+    embed = crear_embed(stats)
+
+    return {
+        "success": True,
+        "stats": stats
+    }
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-

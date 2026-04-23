@@ -2,90 +2,122 @@ import discord
 from discord.ext import commands
 import requests
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
 
-import logging
-
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("discord_bot")
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
-intents = discord.Intents.default()
-# En producción no necesitamos message content intent para slash commands
-intents.message_content = False
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
+# ---------------- READY ----------------
 @bot.event
 async def on_ready():
-    logger.info(f"✅ Bot conectado: {bot.user}")
-    # Si se proporciona GUILD_ID en env, sincronizamos los comandos en ese guild
-    guild_id = os.getenv("GUILD_ID")
-    try:
-        if guild_id:
-            guild = discord.Object(id=int(guild_id))
-            synced = await bot.tree.sync(guild=guild)
-            logger.info(f"✅ {len(synced)} comando(s) sincronizado(s) en guild {guild_id}")
-        else:
-            synced = await bot.tree.sync()
-            logger.info(f"✅ {len(synced)} comando(s) sincronizado(s) globalmente")
-    except Exception as e:
-        logger.exception(f"❌ Error sincronizando comandos: {e}")
+    print(f"✅ Bot listo: {bot.user}")
+    await bot.tree.sync()
 
-
-@bot.tree.command(name="stats", description="Obtener stats de un jugador de Valorant")
-async def stats(interaction: discord.Interaction, nombre: str, region: str = "EUW1"):
-    """Obtiene stats: /stats Nombre NA1"""
+# ---------------- STATS ----------------
+@bot.tree.command(name="stats")
+async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
     await interaction.response.defer()
-    
-    try:
-        response = requests.post(
-            url = f"{TRACKER_URL.rstrip('/')}/tracker",
-            json={"username": nombre, "tag": region, "discord_user_id": str(interaction.user.id)},
-            timeout=10
-        )
-        
-        if response.status_code == 200 and response.json().get("success"):
-            embed = discord.Embed(
-                title="✅ Stats Obtenidas",
-                description="Datos enviados al canal",
-                color=discord.Color.red()
-            )
-            await interaction.followup.send(embed=embed)
-        else:
-            await interaction.followup.send(f"❌ Error: {response.json().get('error', 'Error desconocido')}")
-    
-    except requests.exceptions.Timeout:
-        await interaction.followup.send("❌ Timeout - intenta de nuevo")
-    except requests.exceptions.ConnectionError:
-        await interaction.followup.send(f"❌ No conexión a {TRACKER_URL}")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error: {str(e)}")
 
-
-@bot.tree.command(name="regiones", description="Ver regiones disponibles")
-async def regiones(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🌍 Regiones de Valorant",
-        description="• NA1 - Norteamérica\n• EUW1 - Europa Occ.\n• LATAM - Lat.americana\n• BRA1 - Brasil\n• AP1 - APAC\n• KR - Corea",
-        color=discord.Color.blue()
+    r = requests.post(
+        f"{TRACKER_URL.rstrip('/')}/tracker",
+        json={
+            "username": nombre,
+            "tag": tag,
+            "region": region
+        }
     )
+
+    data = r.json()
+
+    if not data["success"]:
+        await interaction.followup.send("❌ Error")
+        return
+
+    s = data["stats"]
+
+    embed = discord.Embed(
+        title=f"{s['nombre']}#{s['tag']}",
+        color=0xFF4655
+    )
+
+    embed.add_field(name="🎮 Nivel", value=s["nivel"])
+    embed.add_field(name="🏆 Rank", value=s["rank"])
+    embed.add_field(name="📈 RR", value=s["rr"])
+    embed.add_field(name="🗺️ Mapa", value=s["mapa"])
+    embed.add_field(name="🎯 Modo", value=s["modo"])
+
+    await interaction.followup.send(embed=embed)
+
+# ---------------- FRIENDS ----------------
+friends = {}
+
+@bot.tree.command(name="add")
+async def add(interaction, nombre: str, tag: str):
+    uid = interaction.user.id
+
+    if uid not in friends:
+        friends[uid] = []
+
+    friends[uid].append((nombre, tag))
+
+    await interaction.response.send_message("✔ Añadido")
+
+# ---------------- FRIENDS LIST ----------------
+@bot.tree.command(name="friends")
+async def friends_cmd(interaction):
+    uid = interaction.user.id
+
+    if uid not in friends or not friends[uid]:
+        await interaction.response.send_message("No tienes amigos")
+        return
+
+    text = "\n".join([f"{n}#{t}" for n, t in friends[uid]])
+
+    await interaction.response.send_message(f"👥 Amigos:\n{text}")
+
+# ---------------- COMPARE ----------------
+@bot.tree.command(name="compare")
+async def compare(interaction, p1: str, t1: str, p2: str, t2: str):
+    r1 = requests.post(f"{TRACKER_URL}/tracker", json={"username": p1, "tag": t1}).json()
+    r2 = requests.post(f"{TRACKER_URL}/tracker", json={"username": p2, "tag": t2}).json()
+
+    a = r1["stats"]
+    b = r2["stats"]
+
+    embed = discord.Embed(title="⚔️ Compare")
+
+    embed.add_field(name=a["nombre"], value=f"{a['rank']} | {a['rr']} RR")
+    embed.add_field(name=b["nombre"], value=f"{b['rank']} | {b['rr']} RR")
+
     await interaction.response.send_message(embed=embed)
 
+# ---------------- LEADERBOARD ----------------
+@bot.tree.command(name="leaderboard")
+async def leaderboard(interaction):
+    uid = interaction.user.id
 
-if __name__ == "__main__":
-    if not DISCORD_TOKEN:
-        logger.error("DISCORD_TOKEN no configurada en environment")
-        print("❌ DISCORD_TOKEN no configurada en environment")
-    else:
-        try:
-            logger.info("Iniciando bot de Discord...")
-            bot.run(DISCORD_TOKEN)
-        except Exception as e:
-            logger.exception(f"Error al ejecutar el bot: {e}")
-            # asegúrate de que Railway capture el error en logs
-            print(f"Error al ejecutar el bot: {e}")
+    if uid not in friends:
+        await interaction.response.send_message("Sin amigos")
+        return
+
+    scores = []
+
+    for n, t in friends[uid]:
+        r = requests.post(f"{TRACKER_URL}/tracker", json={"username": n, "tag": t}).json()
+        s = r["stats"]
+        scores.append((n, s["rr"], s["rank"]))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+
+    text = "\n".join([f"🏆 {n} - {rr} RR ({rk})" for n, rr, rk in scores])
+
+    await interaction.response.send_message(text)
+
+# ---------------- RUN ----------------
+bot.run(TOKEN)
