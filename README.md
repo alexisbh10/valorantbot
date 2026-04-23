@@ -1,61 +1,30 @@
-# 🎮 Valorant Tracker Bot
+# 🎮 Valorant Tracker Bot 24/7
 
-Bot de Discord para obtener estadísticas de jugadores de Valorant.
+Bot de Discord para obtener estadísticas de jugadores de Valorant, corriendo siempre en la nube.
 
-## 🚀 Instalación Rápida
+## 🚀 Comienza Aquí
 
-Ver: **[START.md](START.md)** - Guía para empezar
-Ver: **[DEPLOY_GITHUB_RENDER.md](DEPLOY_GITHUB_RENDER.md)** - Guía completa de deploy
+### 📖 Guías Principales
 
-## 📥 Instalación Manual
+1. **[START.md](START.md)** - Guía rápida para empezar
+2. **[DEPLOY_RENDER_FULL.md](DEPLOY_RENDER_FULL.md)** - Deploy completo (Bot + Backend en Render)
 
-1. **Instalar dependencias:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🎯 Con este tracker obtienes:
 
-2. **Configurar `.env`:**
-   ```
-   DISCORD_TOKEN=tu_token_aqui
-   TRACKER_URL=https://valorant-tracker.onrender.com  # o http://localhost:8000
-   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/ID/TOKEN
-   ```
-
-3. **Obtener tokens:**
-   - **Discord Token:** https://discord.com/developers/applications → Bot → Copy Token
-   - **Webhook URL:** Discord Server → Settings → Integrations → Webhooks → New Webhook → Copy Link
-
-## 🎯 Uso
-
-**Backend (Render.com):**
-```bash
-# Se despliega automáticamente en Render
-```
-
-**Bot local:**
-```bash
-python discord_bot.py
-```
+- ✅ Bot Discord corriendo 24/7
+- ✅ Backend corriendo 24/7
+- ✅ Sin necesidad de tu PC encendida
+- ✅ HTTPS automático
+- ✅ Actualizaciones automáticas desde GitHub
 
 ## 💬 Comandos Discord
 
-- `/stats nombre region` - Obtener stats de un jugador
-- `/regiones` - Ver regiones disponibles
-
-**Ejemplo:**
 ```
-/stats aceu NA1
+/stats PlayerName NA1       ← Obtener stats de un jugador
+/regiones                   ← Ver regiones disponibles
 ```
 
-## 📊 Respuesta
-
-El bot devuelve un embed con:
-- 👤 Nombre del jugador
-- 🏷️ Tag
-- 🎮 Nivel de cuenta
-- 🔄 Última actualización
-
-## 🌍 Regiones
+## 🌍 Regiones Soportadas
 
 | Código | Región |
 |--------|--------|
@@ -66,22 +35,49 @@ El bot devuelve un embed con:
 | AP1 | APAC |
 | KR | Corea |
 
-## 📡 API Backend
+## 📊 Datos que devuelve
+
+El bot muestra:
+- 👤 Nombre del jugador
+- 🏷️ Tag (región)
+- 🎮 Nivel de cuenta
+- 🔄 Última actualización
+
+## 📁 Estructura del Proyecto
+
+```
+webhook.py           ← Backend FastAPI
+discord_bot.py       ← Bot de Discord
+requirements.txt     ← Dependencias
+Procfile             ← Config Render (Web Service + Worker)
+.env                 ← Variables de entorno
+```
+
+## 🔗 API Backend
 
 **Endpoint:** `POST /tracker`
 
 ```json
 {
-  "username": "nombreJugador",
+  "username": "jugador",
   "tag": "NA1",
   "discord_user_id": "opcional"
 }
 ```
 
-## 🆘 Troubleshooting
+**Respuesta:**
+```json
+{
+  "success": true,
+  "stats": {
+    "nombre": "jugador",
+    "tag": "NA1",
+    "nivel": 185,
+    "ultima_actualizacion": "2024-01-15T10:30:00Z"
+  }
+}
+```
 
-| Error | Solución |
-|-------|----------|
-| "Jugador no encontrado" | Verifica nombre y región |
-| "DISCORD_TOKEN not found" | Configura `.env` correctamente |
-| "Connection refused" | Asegúrate que webhook.py está corriendo |
+## 🆘 Necesitas Ayuda?
+
+Revisa [DEPLOY_RENDER_FULL.md](DEPLOY_RENDER_FULL.md) sección **Troubleshooting**

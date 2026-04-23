@@ -1,83 +1,78 @@
-# ⚡ START - Comienza aquí
+# ⚡ START - Guía Principal
 
-## 📋 Estructura
+## 🎯 Objetivo
+
+Tu Valorant Tracker Bot corriendo **24/7 en Render.com**, sin tu PC.
+
+---
+
+## 📦 Qué incluye
 
 ```
-.env                 ← Tu configuración (rellena con tus tokens)
-discord_bot.py       ← Bot que ejecutas en tu PC
-webhook.py           ← Backend que va en Render.com
-requirements.txt     ← Dependencias
-Procfile, runtime.txt ← Para Render
+webhook.py           ← Backend FastAPI (Web Service en Render)
+discord_bot.py       ← Bot Discord (Background Worker en Render)
+requirements.txt     ← Dependencias Python
+Procfile             ← Configuración Render (2 servicios)
+.env                 ← Tu configuración
 README.md            ← Documentación
 ```
 
 ---
 
-## 🔧 Paso 1: Configurar .env
+## 🚀 Deploy en Render (TODO en la nube)
 
-Abre `.env` y reemplaza:
+### 📖 Sigue esta guía paso-a-paso:
 
-```
-DISCORD_TOKEN=TU_BOT_TOKEN
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/TU_ID/TU_TOKEN
-TRACKER_URL=http://localhost:8000
-```
+**[DEPLOY_RENDER_FULL.md](DEPLOY_RENDER_FULL.md)**
 
-**¿Dónde obtenerlos?**
-- **DISCORD_TOKEN:** https://discord.com/developers/applications → Tu App → Bot → Copy Token
-- **DISCORD_WEBHOOK_URL:** Discord Server → Settings → Integrations → Webhooks → Create Webhook → Copy URL
-- **TRACKER_URL:** Cuando depliegues en Render (ej: `https://valorant-tracker.onrender.com`)
-
----
-
-## 🚀 Paso 2: Deploy del Backend
-
-### 📤 Ver guía completa de Deploy
-
-**[DEPLOY_GITHUB_RENDER.md](DEPLOY_GITHUB_RENDER.md)** - Guía paso-a-paso de:
+Incluye:
 - ✅ Instalar Git
-- ✅ Subir código a GitHub  
-- ✅ Deploy automático en Render.com
+- ✅ Crear repositorio en GitHub
+- ✅ Subir código
+- ✅ Crear Web Service (Backend)
+- ✅ Crear Background Worker (Bot)
 - ✅ Configurar variables de entorno
-- ✅ Obtener tu URL pública
-- ✅ Actualizar `.env` con TRACKER_URL
-
-**Después de completar esa guía, continúa con el Paso 3 abajo.**
+- ✅ Verificar que todo funciona
 
 ---
 
-## 🤖 Paso 3: Ejecutar el Bot
+## 🔑 Obtener tus Tokens
 
-```bash
-# Instalar dependencias
-pip install -r requirements.txt
+Antes de empezar, consigue:
 
-# Ejecutar bot
-python discord_bot.py
-```
+### 1. DISCORD_TOKEN
+- Ve a: https://discord.com/developers/applications
+- Crea una app o selecciona la existente
+- Tab **Bot** → **Copy Token**
+
+### 2. DISCORD_WEBHOOK_URL
+- Tu servidor Discord → Configuración
+- **Integraciones** → **Webhooks**
+- **Crear Webhook** → **Copiar URL**
 
 ---
 
-## 💬 Usar en Discord
+## 💬 Usar el Bot (Una vez deployado)
 
-Escribe en cualquier canal:
+En Discord:
 ```
 /stats PlayerName NA1
+/stats otro_jugador EUW1
 /regiones
 ```
 
-El bot responde con las stats 🎉
+El bot responde **instantáneamente** desde cualquier parte del mundo 🌍
 
 ---
 
-## ✅ Checklist
+## ✅ Checklist Final
 
-- [ ] `.env` configurado con tus tokens
+- [ ] Tokens obtenidos (DISCORD_TOKEN, DISCORD_WEBHOOK_URL)
 - [ ] Git instalado
-- [ ] Código subido a GitHub
-- [ ] Backend deployado en Render
-- [ ] `TRACKER_URL` actualizado en `.env` con tu URL de Render
-- [ ] Bot ejecutándose (`python discord_bot.py`)
-- [ ] Comando `/stats` funciona en Discord
+- [ ] Código en GitHub
+- [ ] Web Service en Render (Backend)
+- [ ] Background Worker en Render (Bot)
+- [ ] Variables de entorno configuradas
+- [ ] `/stats` funciona en Discord
 
-¡Listo!
+¡Listo! Todo corriendo 24/7 ✨
