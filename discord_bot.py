@@ -3,15 +3,30 @@ from discord.ext import commands
 import requests
 import os
 import logging
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
+FRIENDS_FILE = "amigos_valorant.json"
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+
+# ---------------- PERSISTENCIA (GUARDAR AMIGOS) ----------------
+def load_friends():
+    if os.path.exists(FRIENDS_FILE):
+        with open(FRIENDS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_friends(data):
+    with open(FRIENDS_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+friends = load_friends()
 
 # ---------------- READY ----------------
 @bot.event
@@ -19,36 +34,24 @@ async def on_ready():
     print(f"✅ Bot listo: {bot.user}")
     await bot.tree.sync()
 
-# ---------------- SAFE ----------------
-def safe(v, default="N/A"):
-    return default if v is None else v
-
 # ---------------- REQUEST WRAPPER ----------------
 def fetch_stats(nombre, tag, region="eu"):
     try:
         r = requests.post(
             f"{TRACKER_URL.rstrip('/')}/tracker",
-            json={
-                "username": nombre,
-                "tag": tag,
-                "region": region
-            },
-            timeout=10
+            json={"username": nombre, "tag": tag, "region": region},
+            timeout=15
         )
-
         data = r.json()
-
         if not data.get("success"):
-            return None, data.get("error", "unknown error")
-
+            return None, data.get("error", "Error desconocido de la API")
         return data.get("stats", {}), None
-
     except Exception as e:
         return None, str(e)
 
-# ---------------- STATS (FULL TRACKER) ----------------
-@bot.tree.command(name="stats")
-async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
+# ---------------- STATS COMMAND ----------------
+@bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
+async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu"):
     await interaction.response.defer()
 
     s, err = fetch_stats(nombre, tag, region)
@@ -57,127 +60,81 @@ async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
         await interaction.followup.send(f"❌ Error: {err}")
         return
 
-    smurf_text = "⚠️ SMURF DETECTED" if s.get("smurf") else "OK"
-
+    # Diseño Premium del Embed
+    color = 0xFF4655 if not s.get("smurf") else 0x9333EA # Morado si es smurf
     embed = discord.Embed(
-        title=f"{safe(s.get('nombre'))}#{safe(s.get('tag'))}",
-        color=0xFF4655
+        title=f"📊 Estadísticas de {s.get('nombre')}#{s.get('tag')}",
+        description=f"Nivel {s.get('nivel')} | **Últimas 10 partidas**",
+        color=color
     )
 
-    # BASIC
-    embed.add_field(name="🎮 Nivel", value=safe(s.get("nivel")), inline=True)
-    embed.add_field(name="🏆 Rank", value=safe(s.get("rank", "Unranked")), inline=True)
-    embed.add_field(name="📈 RR", value=safe(s.get("rr", 0)), inline=True)
+    if s.get("card"):
+        embed.set_thumbnail(url=s.get("card"))
 
-    # LEVEL 1
-    embed.add_field(name="📊 KDA", value=safe(s.get("kda", 0)), inline=True)
-    embed.add_field(name="📈 Winrate", value=f"{s.get('winrate', 0)}%", inline=True)
+    # Fila 1: Rango
+    embed.add_field(name="🏆 Rango", value=f"**{s.get('rank')}** ({s.get('rr')} RR)", inline=True)
+    embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
+    embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
 
-    # LEVEL 2
-    embed.add_field(name="🧠 ELO", value=safe(s.get("elo", 0)), inline=True)
-    embed.add_field(name="📉 Consistencia", value=safe(s.get("consistency", 0)), inline=True)
-    embed.add_field(name="📈 Tendencia", value=safe(s.get("trend", "UNKNOWN")), inline=True)
+    # Fila 2: Tiroteo
+    embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
+    embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
+    embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
-    # LEVEL 3
-    embed.add_field(name="🧪 Estado", value=smurf_text, inline=False)
-
-    # LAST MATCH
-    embed.add_field(name="🗺️ Último mapa", value=safe(s.get("mapa")), inline=True)
-    embed.add_field(name="🎯 Modo", value=safe(s.get("modo")), inline=True)
+    # Footer
+    estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
+    embed.set_footer(text=f"Última partida: {s.get('modo')} en {s.get('mapa')} • {estado}")
 
     await interaction.followup.send(embed=embed)
 
-# ---------------- FRIENDS ----------------
-friends = {}
-
-@bot.tree.command(name="add")
-async def add(interaction, nombre: str, tag: str):
-    uid = interaction.user.id
-    friends.setdefault(uid, []).append((nombre, tag))
-    await interaction.response.send_message("✔ Añadido")
-
-# ---------------- FRIENDS LIST ----------------
-@bot.tree.command(name="friends")
-async def friends_cmd(interaction):
-    uid = interaction.user.id
-
-    if uid not in friends or not friends[uid]:
-        await interaction.response.send_message("No tienes amigos")
+# ---------------- AÑADIR AMIGO ----------------
+@bot.tree.command(name="add", description="Guarda a un colega en la lista del servidor")
+async def add(interaction: discord.Interaction, nombre: str, tag: str):
+    server_id = str(interaction.guild_id)
+    if server_id not in friends:
+        friends[server_id] = []
+    
+    # Evitar duplicados
+    if any(f["nombre"].lower() == nombre.lower() and f["tag"].lower() == tag.lower() for f in friends[server_id]):
+        await interaction.response.send_message(f"⚠️ {nombre}#{tag} ya está en la lista.")
         return
 
-    text = "\n".join([f"{n}#{t}" for n, t in friends[uid]])
-    await interaction.response.send_message(f"👥 Amigos:\n{text}")
+    friends[server_id].append({"nombre": nombre, "tag": tag})
+    save_friends(friends)
+    await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
 
-# ---------------- COMPARE (UPGRADED) ----------------
-@bot.tree.command(name="compare")
-async def compare(interaction, p1: str, t1: str, p2: str, t2: str):
-    await interaction.response.defer()
+# ---------------- LEADERBOARD ----------------
+@bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
+async def leaderboard(interaction: discord.Interaction):
+    server_id = str(interaction.guild_id)
 
-    s1, e1 = fetch_stats(p1, t1)
-    s2, e2 = fetch_stats(p2, t2)
-
-    if e1 or e2 or not s1 or not s2:
-        await interaction.followup.send(f"❌ Error: {e1 or e2}")
-        return
-
-    embed = discord.Embed(title="⚔️ Compare (Pro)", color=0xFF4655)
-
-    embed.add_field(
-        name=safe(s1.get("nombre")),
-        value=(
-            f"🏆 {s1.get('rank')} | {s1.get('rr', 0)} RR\n"
-            f"📊 KDA {s1.get('kda')} | WR {s1.get('winrate')}%\n"
-            f"🧠 ELO {s1.get('elo')}"
-        ),
-        inline=True
-    )
-
-    embed.add_field(
-        name=safe(s2.get("nombre")),
-        value=(
-            f"🏆 {s2.get('rank')} | {s2.get('rr', 0)} RR\n"
-            f"📊 KDA {s2.get('kda')} | WR {s2.get('winrate')}%\n"
-            f"🧠 ELO {s2.get('elo')}"
-        ),
-        inline=True
-    )
-
-    await interaction.followup.send(embed=embed)
-
-# ---------------- LEADERBOARD (PRO) ----------------
-@bot.tree.command(name="leaderboard")
-async def leaderboard(interaction):
-    uid = interaction.user.id
-
-    if uid not in friends or not friends[uid]:
-        await interaction.response.send_message("Sin amigos")
+    if server_id not in friends or not friends[server_id]:
+        await interaction.response.send_message("❌ No hay nadie en la lista. Usad `/add` primero.")
         return
 
     await interaction.response.defer()
-
     scores = []
 
-    for n, t in friends[uid]:
-        s, err = fetch_stats(n, t)
+    for amigo in friends[server_id]:
+        s, err = fetch_stats(amigo["nombre"], amigo["tag"])
+        if not err and s:
+            scores.append(s)
 
-        if err or not s:
-            continue
+    if not scores:
+        await interaction.followup.send("❌ No se pudieron cargar las stats de nadie.")
+        return
 
-        scores.append((
-            n,
-            s.get("elo", 0),
-            s.get("winrate", 0),
-            s.get("rank", "Unranked")
-        ))
+    # Ordenar por ACS (Puntuación media de combate) de mayor a menor
+    scores.sort(key=lambda x: float(x.get("acs", 0)), reverse=True)
 
-    scores.sort(key=lambda x: x[1], reverse=True)
+    embed = discord.Embed(title="🏆 Leaderboard de Colegas (Top ACS)", color=0xFFD700)
+    
+    for i, p in enumerate(scores):
+        medalla = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🔹"
+        stats_txt = f"**ACS:** {p.get('acs')} | **KDA:** {p.get('kda')} | **Rank:** {p.get('rank')}"
+        embed.add_field(name=f"{medalla} {p.get('nombre')}#{p.get('tag')}", value=stats_txt, inline=False)
 
-    text = "\n".join([
-        f"🏆 {n} | ELO {elo} | WR {wr}% | {rk}"
-        for n, elo, wr, rk in scores
-    ]) or "Sin datos"
-
-    await interaction.followup.send(text)
+    await interaction.followup.send(embed=embed)
 
 # ---------------- RUN ----------------
 bot.run(TOKEN)
