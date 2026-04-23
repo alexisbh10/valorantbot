@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord.ext import tasks
 import requests
 import os
 import logging
@@ -15,6 +16,24 @@ FRIENDS_FILE = "amigos_valorant.json"
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
+# PON AQUÍ EL ID DEL CANAL DONDE EL BOT MANDARÁ LAS ALERTAS
+# (Click derecho en el canal de texto de tu Discord -> Copiar ID de canal)
+CANAL_ALERTAS_ID = 1496835339828990078 
+
+LAST_MATCHES_FILE = "ultimas_partidas.json"
+
+def load_last_matches():
+    if os.path.exists(LAST_MATCHES_FILE):
+        with open(LAST_MATCHES_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_last_matches(data):
+    with open(LAST_MATCHES_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+last_matches_cache = load_last_matches()
+
 # ---------------- PERSISTENCIA (GUARDAR AMIGOS) ----------------
 def load_friends():
     if os.path.exists(FRIENDS_FILE):
@@ -29,10 +48,74 @@ def save_friends(data):
 friends = load_friends()
 
 # ---------------- READY ----------------
+# ---------------- READY & BACKGROUND TASK ----------------
 @bot.event
 async def on_ready():
     print(f"✅ Bot listo: {bot.user}")
     await bot.tree.sync()
+    if not vigilante_partidas.is_running():
+        vigilante_partidas.start()
+
+@tasks.loop(minutes=5) # Revisa cada 5 minutos
+async def vigilante_partidas():
+    if not friends: return
+    
+    canal = bot.get_channel(CANAL_ALERTAS_ID)
+    if not canal: return
+
+    for server_id, friend_list in friends.items():
+        for f in friend_list:
+            nombre, tag = f["nombre"], f["tag"]
+            s, err = fetch_stats(nombre, tag)
+            
+            if err or not s or not s.get("last_match"):
+                continue
+
+            lm = s["last_match"]
+            match_id = lm.get("id")
+            key = f"{nombre}#{tag}"
+
+            # Si es una partida nueva que no habíamos registrado
+            if match_id and last_matches_cache.get(key) != match_id:
+                last_matches_cache[key] = match_id
+                save_last_matches(last_matches_cache)
+
+                # Ignoramos Deathmatch u otros modos para las alertas si queremos, 
+                # o verificamos si la partida es digna de mención.
+                if s["modo"].lower() not in ["competitive", "unrated"]:
+                    continue
+
+                k = lm["kills"]
+                d = lm["deaths"]
+                acs = lm["acs"]
+                won = lm["won"]
+                resultado = "VICTORIA" if won else "DERROTA"
+
+                # ALERTA DE CARREADA (Jugó increíble)
+                if k >= 25 or acs >= 300:
+                    embed = discord.Embed(
+                        title=f"🚨 ¡ALERTA DE CARREADA! 🚨",
+                        description=f"**{nombre}#{tag}** acaba de destrozar el lobby en {s['mapa']}.",
+                        color=0x00FF00 # Verde
+                    )
+                    embed.add_field(name="Resultado", value=resultado, inline=True)
+                    embed.add_field(name="K/D/A", value=f"{k}/{d}/{lm['assists']}", inline=True)
+                    embed.add_field(name="ACS", value=str(acs), inline=True)
+                    if s.get("card"): embed.set_thumbnail(url=s.get("card"))
+                    await canal.send(embed=embed)
+
+                # ALERTA DE BOT (Jugó fatal)
+                elif d > (k + 10) or acs < 120:
+                    embed = discord.Embed(
+                        title=f"🗑️ ¡Tenemos un infiltrado de Hierro! 🗑️",
+                        description=f"El monitor de **{nombre}#{tag}** estaba apagado en {s['mapa']}.",
+                        color=0xFF0000 # Rojo
+                    )
+                    embed.add_field(name="Resultado", value=resultado, inline=True)
+                    embed.add_field(name="K/D/A", value=f"{k}/{d}/{lm['assists']}", inline=True)
+                    embed.add_field(name="ACS", value=str(acs), inline=True)
+                    if s.get("card"): embed.set_thumbnail(url=s.get("card"))
+                    await canal.send(embed=embed)
 
 # ---------------- REQUEST WRAPPER ----------------
 def fetch_stats(nombre, tag, region="eu"):

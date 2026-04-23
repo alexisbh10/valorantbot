@@ -33,6 +33,7 @@ def safe_get(url, headers):
         return {}
 
 # ---------------- REAL ANALYTICS ----------------
+# ---------------- REAL ANALYTICS (Arreglado Winrate) ----------------
 def analyze_matches(matches, username, tag):
     if not matches:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0}
@@ -43,7 +44,7 @@ def analyze_matches(matches, username, tag):
     kdas_history = []
     total_matches = 0
 
-    for m in matches[:10]: # Analizamos las últimas 10 partidas
+    for m in matches[:10]:
         players = m.get("players", {}).get("all_players", [])
         player = None
 
@@ -57,22 +58,18 @@ def analyze_matches(matches, username, tag):
 
         stats = player.get("stats", {})
         
-        # Básicos
         k = stats.get("kills", 0)
         d = stats.get("deaths", 1)
         a = stats.get("assists", 0)
         
-        # Tiroteo
         hs = stats.get("headshots", 0)
         bs = stats.get("bodyshots", 0)
         ls = stats.get("legshots", 0)
         
-        # Impacto
         dmg = player.get("damage_made") or stats.get("damage_made") or 0
         sc = stats.get("score", 0)
         r = m.get("metadata", {}).get("rounds_played", 1)
 
-        # Acumulados
         kills += k
         deaths += d
         assists += a
@@ -83,29 +80,24 @@ def analyze_matches(matches, username, tag):
         rounds += r
         score += sc
 
-        # KDA Individual para la tendencia
         kdas_history.append((k + a) / max(d, 1))
 
-        # Winrate
-        team = player.get("team")
+        # ARREGLO DEL WINRATE: Todo a minúsculas
+        team = player.get("team", "").lower()
         teams = m.get("teams", {})
-        if team and isinstance(teams, dict) and teams.get(team, {}).get("has_won"):
-            wins += 1
+        if team and isinstance(teams, dict):
+            # Buscamos en red o blue
+            if teams.get(team, {}).get("has_won"):
+                wins += 1
 
         total_matches += 1
 
     if total_matches == 0:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0}
 
-    # Cálculos Reales
     total_shots = headshots + bodyshots + legshots
-    kda_real = round((kills + assists) / max(deaths, 1), 2)
-    winrate = round((wins / total_matches) * 100, 1)
-    hs_percent = round((headshots / max(total_shots, 1)) * 100, 1)
-    adr = round(damage / max(rounds, 1), 1)
-    acs = round(score / max(rounds, 1), 1)
-
-    # Tendencia (Comparando primera mitad vs segunda mitad)
+    
+    # Tendencia
     trend = "Estable ➖"
     if len(kdas_history) >= 4:
         chronological = list(reversed(kdas_history))
@@ -116,12 +108,12 @@ def analyze_matches(matches, username, tag):
         elif p2 < p1 - 0.3: trend = "Empeorando 📉"
 
     return {
-        "kda": kda_real,
-        "winrate": winrate,
+        "kda": round((kills + assists) / max(deaths, 1), 2),
+        "winrate": round((wins / total_matches) * 100, 1),
         "trend": trend,
-        "hs": hs_percent,
-        "adr": adr,
-        "acs": acs
+        "hs": round((headshots / max(total_shots, 1)) * 100, 1),
+        "adr": round(damage / max(rounds, 1), 1),
+        "acs": round(score / max(rounds, 1), 1)
     }
 
 # ---------------- CORE ----------------
@@ -132,28 +124,45 @@ def obtener_stats(username, tag, region="eu"):
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
 
-    # ACCOUNT INFO
     acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
     acc = acc_json.get("data", {})
 
-    # MMR (ARREGLADO: v1 es más directo y falla menos para el Rango)
     mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
     mmr_data = mmr_json.get("data", {})
-    
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
-    # MATCHES PARA STATS
     match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
     matches = match_json.get("data", [])
 
+    # Extraer datos específicos de la ÚLTIMA partida para las Alertas
     last_match = matches[0] if matches else {}
     mapa = last_match.get("metadata", {}).get("map", "Desconocido")
     modo = last_match.get("metadata", {}).get("mode", "Desconocido")
+    match_id = last_match.get("metadata", {}).get("matchid", "")
+    
+    last_match_info = {}
+    if last_match:
+        players = last_match.get("players", {}).get("all_players", [])
+        for p in players:
+            if p.get("name", "").lower() == username.lower() and p.get("tag", "").lower() == tag.lower():
+                s = p.get("stats", {})
+                r = last_match.get("metadata", {}).get("rounds_played", 1)
+                team = p.get("team", "").lower()
+                won = last_match.get("teams", {}).get(team, {}).get("has_won", False)
+                
+                last_match_info = {
+                    "id": match_id,
+                    "kills": s.get("kills", 0),
+                    "deaths": s.get("deaths", 1),
+                    "assists": s.get("assists", 0),
+                    "acs": round(s.get("score", 0) / max(r, 1), 1),
+                    "won": won
+                }
+                break
 
     analysis = analyze_matches(matches, username, tag)    
 
-    # Smurf Detect Realista (KDA > 1.8 y Winrate > 65% en rangos bajos)
     is_smurf = (analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]))
 
     stats = {
@@ -171,7 +180,8 @@ def obtener_stats(username, tag, region="eu"):
         "adr": analysis["adr"],
         "acs": analysis["acs"],
         "trend": analysis["trend"],
-        "smurf": is_smurf
+        "smurf": is_smurf,
+        "last_match": last_match_info # <-- Nuevo dato añadido aquí
     }
 
     set_cache(key, stats)
