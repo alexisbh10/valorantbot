@@ -46,26 +46,43 @@ def fetch_stats(nombre, tag, region="eu"):
     except Exception as e:
         return None, str(e)
 
-# ---------------- STATS ----------------
+# ---------------- STATS (FULL TRACKER) ----------------
 @bot.tree.command(name="stats")
 async def stats(interaction, nombre: str, tag: str, region: str = "eu"):
     await interaction.response.defer()
 
     s, err = fetch_stats(nombre, tag, region)
 
-    if err:
+    if err or not s:
         await interaction.followup.send(f"❌ Error: {err}")
         return
+
+    smurf_text = "⚠️ SMURF DETECTED" if s.get("smurf") else "OK"
 
     embed = discord.Embed(
         title=f"{safe(s.get('nombre'))}#{safe(s.get('tag'))}",
         color=0xFF4655
     )
 
+    # BASIC
     embed.add_field(name="🎮 Nivel", value=safe(s.get("nivel")), inline=True)
     embed.add_field(name="🏆 Rank", value=safe(s.get("rank", "Unranked")), inline=True)
     embed.add_field(name="📈 RR", value=safe(s.get("rr", 0)), inline=True)
-    embed.add_field(name="🗺️ Mapa", value=safe(s.get("mapa")), inline=True)
+
+    # LEVEL 1
+    embed.add_field(name="📊 KDA", value=safe(s.get("kda", 0)), inline=True)
+    embed.add_field(name="📈 Winrate", value=f"{s.get('winrate', 0)}%", inline=True)
+
+    # LEVEL 2
+    embed.add_field(name="🧠 ELO", value=safe(s.get("elo", 0)), inline=True)
+    embed.add_field(name="📉 Consistencia", value=safe(s.get("consistency", 0)), inline=True)
+    embed.add_field(name="📈 Tendencia", value=safe(s.get("trend", "UNKNOWN")), inline=True)
+
+    # LEVEL 3
+    embed.add_field(name="🧪 Estado", value=smurf_text, inline=False)
+
+    # LAST MATCH
+    embed.add_field(name="🗺️ Último mapa", value=safe(s.get("mapa")), inline=True)
     embed.add_field(name="🎯 Modo", value=safe(s.get("modo")), inline=True)
 
     await interaction.followup.send(embed=embed)
@@ -91,7 +108,7 @@ async def friends_cmd(interaction):
     text = "\n".join([f"{n}#{t}" for n, t in friends[uid]])
     await interaction.response.send_message(f"👥 Amigos:\n{text}")
 
-# ---------------- COMPARE ----------------
+# ---------------- COMPARE (UPGRADED) ----------------
 @bot.tree.command(name="compare")
 async def compare(interaction, p1: str, t1: str, p2: str, t2: str):
     await interaction.response.defer()
@@ -99,27 +116,35 @@ async def compare(interaction, p1: str, t1: str, p2: str, t2: str):
     s1, e1 = fetch_stats(p1, t1)
     s2, e2 = fetch_stats(p2, t2)
 
-    if e1 or e2:
+    if e1 or e2 or not s1 or not s2:
         await interaction.followup.send(f"❌ Error: {e1 or e2}")
         return
 
-    embed = discord.Embed(title="⚔️ Compare", color=0xFF4655)
+    embed = discord.Embed(title="⚔️ Compare (Pro)", color=0xFF4655)
 
     embed.add_field(
         name=safe(s1.get("nombre")),
-        value=f"{safe(s1.get('rank'))} | {safe(s1.get('rr', 0))} RR",
+        value=(
+            f"🏆 {s1.get('rank')} | {s1.get('rr', 0)} RR\n"
+            f"📊 KDA {s1.get('kda')} | WR {s1.get('winrate')}%\n"
+            f"🧠 ELO {s1.get('elo')}"
+        ),
         inline=True
     )
 
     embed.add_field(
         name=safe(s2.get("nombre")),
-        value=f"{safe(s2.get('rank'))} | {safe(s2.get('rr', 0))} RR",
+        value=(
+            f"🏆 {s2.get('rank')} | {s2.get('rr', 0)} RR\n"
+            f"📊 KDA {s2.get('kda')} | WR {s2.get('winrate')}%\n"
+            f"🧠 ELO {s2.get('elo')}"
+        ),
         inline=True
     )
 
     await interaction.followup.send(embed=embed)
 
-# ---------------- LEADERBOARD ----------------
+# ---------------- LEADERBOARD (PRO) ----------------
 @bot.tree.command(name="leaderboard")
 async def leaderboard(interaction):
     uid = interaction.user.id
@@ -140,15 +165,16 @@ async def leaderboard(interaction):
 
         scores.append((
             n,
-            s.get("rr", 0),
+            s.get("elo", 0),
+            s.get("winrate", 0),
             s.get("rank", "Unranked")
         ))
 
     scores.sort(key=lambda x: x[1], reverse=True)
 
     text = "\n".join([
-        f"🏆 {n} - {rr} RR ({rk})"
-        for n, rr, rk in scores
+        f"🏆 {n} | ELO {elo} | WR {wr}% | {rk}"
+        for n, elo, wr, rk in scores
     ]) or "Sin datos"
 
     await interaction.followup.send(text)
