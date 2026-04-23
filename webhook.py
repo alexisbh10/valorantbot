@@ -2,13 +2,11 @@ import requests
 import os
 import time
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from datetime import datetime
 
 app = FastAPI()
 
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 cache = {}
 
@@ -23,7 +21,15 @@ def get_cache(k):
 def set_cache(k, v):
     cache[k] = (v, time.time())
 
-# ---------------- CORE STATS ----------------
+# ---------------- SAFE REQUEST ----------------
+def safe_get(url, headers):
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        return r.json()
+    except:
+        return {}
+
+# ---------------- CORE ----------------
 def obtener_stats(username, tag, region="eu"):
     key = f"{username}{tag}"
     cached = get_cache(key)
@@ -32,47 +38,53 @@ def obtener_stats(username, tag, region="eu"):
 
     headers = {"Authorization": HENRIK_API_KEY}
 
-    acc = requests.get(
+    # ACCOUNT
+    acc_json = safe_get(
         f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}",
-        headers=headers
-    ).json()["data"]
+        headers
+    )
+    acc = acc_json.get("data") or {}
 
-    mmr = requests.get(
+    # MMR
+    mmr_json = safe_get(
         f"https://api.henrikdev.xyz/valorant/v2/mmr/{region}/{username}/{tag}",
-        headers=headers
-    ).json()["data"]
+        headers
+    )
+    mmr = mmr_json.get("data") or {}
 
-    matches = requests.get(
+    # MATCHES
+    match_json = safe_get(
         f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}",
-        headers=headers
-    ).json()["data"]
+        headers
+    )
+    matches = match_json.get("data") or []
 
-    last = matches[0]
+    last = matches[0] if matches else None
 
     stats = {
-        "nombre": acc["name"],
-        "tag": acc["tag"],
-        "nivel": acc["account_level"],
+        "nombre": acc.get("name", "N/A"),
+        "tag": acc.get("tag", "N/A"),
+        "nivel": acc.get("account_level", 0),
 
-        "rank": mmr["currenttierpatched"],
-        "rr": mmr["ranking_in_tier"],
+        "rank": mmr.get("currenttierpatched", "Unranked"),
+        "rr": mmr.get("ranking_in_tier", 0),
 
-        "mapa": last["metadata"]["map"],
-        "modo": last["metadata"]["mode"]
+        "mapa": last["metadata"]["map"] if last else "N/A",
+        "modo": last["metadata"]["mode"] if last else "N/A"
     }
 
     set_cache(key, stats)
     return stats
 
-# ---------------- DISCORD EMBED ----------------
+# ---------------- EMBED ----------------
 def crear_embed(s):
     return {
         "title": f"📊 {s['nombre']}#{s['tag']}",
         "color": 0xFF4655,
         "fields": [
-            {"name": "🎮 Nivel", "value": s["nivel"], "inline": True},
+            {"name": "🎮 Nivel", "value": str(s["nivel"]), "inline": True},
             {"name": "🏆 Rank", "value": s["rank"], "inline": True},
-            {"name": "📈 RR", "value": s["rr"], "inline": True},
+            {"name": "📈 RR", "value": str(s["rr"]), "inline": True},
             {"name": "🗺️ Mapa", "value": s["mapa"], "inline": True},
             {"name": "🎯 Modo", "value": s["modo"], "inline": True},
         ],
@@ -87,19 +99,18 @@ async def tracker(request: Request):
     username = body.get("username")
     tag = body.get("tag")
     region = body.get("region", "eu")
-    user_id = body.get("discord_user_id")
 
     if not username or not tag:
         raise HTTPException(status_code=400, detail="username y tag requeridos")
 
     stats = obtener_stats(username, tag, region)
-    embed = crear_embed(stats)
 
     return {
         "success": True,
         "stats": stats
     }
 
+# ---------------- HEALTH ----------------
 @app.get("/health")
 async def health():
     return {"status": "ok"}
