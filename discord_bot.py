@@ -63,7 +63,6 @@ async def vigilante_partidas():
             nombre, tag = f["nombre"], f["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            # PAUSA PARA EVITAR QUE LA API NOS Banee TEMPORALMENTE (Rate Limit)
             await asyncio.sleep(1.5)
             
             if err or not s or not s.get("last_match"):
@@ -86,10 +85,13 @@ async def vigilante_partidas():
                 won = lm["won"]
                 resultado = "VICTORIA" if won else "DERROTA"
 
+                nombre_real = s.get('nombre') or nombre
+                tag_real = s.get('tag') or tag
+
                 if k >= 25 or acs >= 300:
                     embed = discord.Embed(
                         title=f"🚨 ¡ALERTA DE CARREADA! 🚨",
-                        description=f"**{nombre}#{tag}** acaba de destrozar el lobby en {s['mapa']}.",
+                        description=f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby en {s['mapa']}.",
                         color=0x00FF00
                     )
                     embed.add_field(name="Resultado", value=resultado, inline=True)
@@ -101,7 +103,7 @@ async def vigilante_partidas():
                 elif d > (k + 10) or acs < 120:
                     embed = discord.Embed(
                         title=f"🗑️ ¡Tenemos un infiltrado de Hierro! 🗑️",
-                        description=f"El monitor de **{nombre}#{tag}** estaba apagado en {s['mapa']}.",
+                        description=f"El monitor de **{nombre_real}#{tag_real}** estaba apagado en {s['mapa']}.",
                         color=0xFF0000
                     )
                     embed.add_field(name="Resultado", value=resultado, inline=True)
@@ -110,7 +112,6 @@ async def vigilante_partidas():
                     if s.get("card"): embed.set_thumbnail(url=s.get("card"))
                     await canal.send(embed=embed)
 
-# ---------------- REQUEST WRAPPER CLÁSICO PERO SEGURO ----------------
 async def fetch_stats(nombre, tag, region="eu"):
     def _request():
         try:
@@ -126,7 +127,6 @@ async def fetch_stats(nombre, tag, region="eu"):
         except Exception as e:
             return None, str(e)
     
-    # Esto ejecuta tu código original sin congelar a Discord
     return await asyncio.to_thread(_request)
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
@@ -139,9 +139,12 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         await interaction.followup.send(f"❌ Error: {err}")
         return
 
+    nombre_perfil = s.get('nombre') or nombre
+    tag_perfil = s.get('tag') or tag
+
     color = 0xFF4655 if not s.get("smurf") else 0x9333EA
     embed = discord.Embed(
-        title=f"📊 Estadísticas de {s.get('nombre')}#{s.get('tag')}",
+        title=f"📊 Estadísticas de {nombre_perfil}#{tag_perfil}",
         description=f"Nivel {s.get('nivel')} | **Últimas 10 partidas**",
         color=color
     )
@@ -157,16 +160,14 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
-    # LOS ENLACES DE LINEUPS EXACTAMENTE COMO LOS PEDISTE
+    # AQUÍ ESTÁ EL CAMBIO PARA LINEUPSVALORANT.COM
     top_agents = s.get("top_agents", [])
     if top_agents:
-        lineups_links = []
-        for agent in top_agents:
-            agente_formateado = agent.lower().replace("/", "") 
-            url = f"https://lineupsvalorant.com/agent/{agente_formateado}"
-            lineups_links.append(f"[{agent}]({url})")
-            
-        embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
+        agentes_str = " | ".join(top_agents)
+        # Mostramos los agentes que ha jugado
+        embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
+        # Ponemos el enlace general limpio a la web
+        embed.add_field(name="📚 Aprende setups", value="[Buscar en LineupsValorant.com](https://lineupsvalorant.com/)", inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
     modo_str = s.get('modo', 'Desconocido')
@@ -204,7 +205,6 @@ async def leaderboard(interaction: discord.Interaction):
     for amigo in friends[server_id]:
         s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
         
-        # OTRA PAUSA AQUÍ PARA NO SATURAR EL LEADERBOARD
         await asyncio.sleep(1.5)
         
         if not err and s:
@@ -222,9 +222,12 @@ async def leaderboard(interaction: discord.Interaction):
     
     for i, p in enumerate(scores):
         medalla = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🔹"
+        
+        nombre_lb = p.get('nombre') or "Jugador"
+        tag_lb = p.get('tag') or ""
         main_agent = p.get('agent', 'Desconocido')
         stats_txt = f"**ACS:** {p.get('acs')} | **KDA:** {p.get('kda')} | **Rank:** {p.get('rank')}"
-        embed.add_field(name=f"{medalla} {p.get('nombre')}#{p.get('tag')} ({main_agent})", value=stats_txt, inline=False)
+        embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
 
     if jugadores_fantasma:
         nombres_rotos = ", ".join(jugadores_fantasma)
