@@ -48,7 +48,10 @@ def analyze_matches(matches, username, tag):
         player = None
 
         for p in players:
-            if p.get("name", "").lower() == username.lower() and p.get("tag", "").lower() == tag.lower():
+            # FIX: Asegurarnos de que el nombre/tag no vengan como None antes de hacer .lower()
+            p_name = p.get("name") or ""
+            p_tag = p.get("tag") or ""
+            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
                 player = p
                 break
 
@@ -61,17 +64,18 @@ def analyze_matches(matches, username, tag):
 
         stats = player.get("stats", {})
         
-        k = stats.get("kills", 0)
-        d = stats.get("deaths", 1)
-        a = stats.get("assists", 0)
+        # FIX: Evitar que kills/deaths vengan como Null desde la API
+        k = stats.get("kills") or 0
+        d = stats.get("deaths") or 1
+        a = stats.get("assists") or 0
         
-        hs = stats.get("headshots", 0)
-        bs = stats.get("bodyshots", 0)
-        ls = stats.get("legshots", 0)
+        hs = stats.get("headshots") or 0
+        bs = stats.get("bodyshots") or 0
+        ls = stats.get("legshots") or 0
         
         dmg = player.get("damage_made") or stats.get("damage_made") or 0
-        sc = stats.get("score", 0)
-        r = m.get("metadata", {}).get("rounds_played", 1)
+        sc = stats.get("score") or 0
+        r = m.get("metadata", {}).get("rounds_played") or 1
 
         kills += k
         deaths += d
@@ -85,7 +89,8 @@ def analyze_matches(matches, username, tag):
 
         kdas_history.append((k + a) / max(d, 1))
 
-        team = player.get("team", "").lower()
+        # FIX DEL CRASH: Deathmatch devuelve team=null. (player.get("team") or "") evita el error de .lower()
+        team = (player.get("team") or "").lower()
         teams = m.get("teams", {})
         if team and isinstance(teams, dict):
             if teams.get(team, {}).get("has_won"):
@@ -149,18 +154,22 @@ def obtener_stats(username, tag, region="eu"):
     if last_match:
         players = last_match.get("players", {}).get("all_players", [])
         for p in players:
-            if p.get("name", "").lower() == username.lower() and p.get("tag", "").lower() == tag.lower():
+            p_name = p.get("name") or ""
+            p_tag = p.get("tag") or ""
+            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
                 s = p.get("stats", {})
-                r = last_match.get("metadata", {}).get("rounds_played", 1)
-                team = p.get("team", "").lower()
-                won = last_match.get("teams", {}).get(team, {}).get("has_won", False)
+                r = last_match.get("metadata", {}).get("rounds_played") or 1
+                
+                # FIX: Lo mismo aquí, evitamos crash si el equipo viene Null
+                team = (p.get("team") or "").lower()
+                won = last_match.get("teams", {}).get(team, {}).get("has_won", False) if team else False
                 
                 last_match_info = {
                     "id": match_id,
-                    "kills": s.get("kills", 0),
-                    "deaths": s.get("deaths", 1),
-                    "assists": s.get("assists", 0),
-                    "acs": round(s.get("score", 0) / max(r, 1), 1),
+                    "kills": s.get("kills") or 0,
+                    "deaths": s.get("deaths") or 1,
+                    "assists": s.get("assists") or 0,
+                    "acs": round((s.get("score") or 0) / max(r, 1), 1),
                     "won": won
                 }
                 break
