@@ -1,6 +1,7 @@
 import requests
 import os
 import time
+import urllib.parse
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
 
@@ -13,7 +14,8 @@ cache = {}
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        if time.time() - ts < 120: 
+        # CACHÉ A 180 SEGS (3 MINS): El equilibrio perfecto entre Leaderboard rápido y Alertas frescas
+        if time.time() - ts < 180: 
             return data
     return None
 
@@ -22,7 +24,7 @@ def set_cache(k, v):
 
 def safe_get(url, headers):
     try:
-        r = requests.get(url, headers=headers, timeout=12)
+        r = requests.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
             return r.json()
         elif r.status_code == 429:
@@ -32,9 +34,6 @@ def safe_get(url, headers):
         print(f"Error API: {e}")
         return {}
 
-# -------------------------------------------------------------
-# BALA DE PLATA: AHORA BUSCAMOS POR PUUID, NO POR NOMBRE
-# -------------------------------------------------------------
 def analyze_matches(matches, puuid):
     if not matches or not puuid:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
@@ -50,7 +49,6 @@ def analyze_matches(matches, puuid):
         players = m.get("players", {}).get("all_players", [])
         player = None
 
-        # Ya no comparamos strings, buscamos el ID exacto del jugador
         for p in players:
             if p.get("puuid") == puuid:
                 player = p
@@ -89,7 +87,6 @@ def analyze_matches(matches, puuid):
 
         kdas_history.append((k + a) / max(d, 1))
 
-        # Evitar crasheos con Deathmatch (equipo nulo)
         team = (player.get("team") or "").lower()
         teams = m.get("teams", {})
         if team and isinstance(teams, dict):
@@ -134,23 +131,22 @@ def obtener_stats(username, tag, region="eu"):
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
 
-    # 1. OBJETIVO PRIMORDIAL: SACAR EL PUUID
-    acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
+    safe_user = urllib.parse.quote(username)
+    safe_tag = urllib.parse.quote(tag)
+
+    acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
     acc = acc_json.get("data", {})
     
     puuid = acc.get("puuid")
-    # Guardamos su nombre real tal y como está en el juego
-    real_name = acc.get("name", username)
-    real_tag = acc.get("tag", tag)
+    real_name = acc.get("name") or username
+    real_tag = acc.get("tag") or tag
 
-    # 2. RANGO
-    mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
+    mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
     mmr_data = mmr_json.get("data", {})
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
-    # 3. PARTIDAS
-    match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
+    match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10", headers)
     matches = match_json.get("data", [])
 
     last_match = matches[0] if matches else {}
@@ -162,7 +158,6 @@ def obtener_stats(username, tag, region="eu"):
     if last_match and puuid:
         players = last_match.get("players", {}).get("all_players", [])
         for p in players:
-            # Buscamos su DNI interno en la partida
             if p.get("puuid") == puuid:
                 s = p.get("stats", {})
                 r = last_match.get("metadata", {}).get("rounds_played") or 1
@@ -180,7 +175,6 @@ def obtener_stats(username, tag, region="eu"):
                 }
                 break
 
-    # Pasamos el PUUID para el análisis global
     analysis = analyze_matches(matches, puuid)    
 
     is_smurf = (analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]))
@@ -221,7 +215,6 @@ async def tracker(request: Request):
 
     stats = obtener_stats(username, tag, region)
 
-    # Si no saca ni rango ni nivel, es que la cuenta no existe o está capada
     if stats["rank"] == "Unranked" and stats["nivel"] == 0:
         return {"success": False, "error": "Jugador no encontrado o perfil privado."}
 

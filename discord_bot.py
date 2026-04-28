@@ -53,17 +53,21 @@ async def on_ready():
 
 @tasks.loop(minutes=5)
 async def vigilante_partidas():
+    await bot.wait_until_ready() 
     if not friends: return
     
-    canal = bot.get_channel(CANAL_ALERTAS_ID)
-    if not canal: return
+    try:
+        canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
+    except Exception as e:
+        print(f"⚠️ ERROR: No se puede encontrar el canal de alertas. Revisa el CANAL_ALERTAS_ID.")
+        return
 
     for server_id, friend_list in friends.items():
         for f in friend_list:
             nombre, tag = f["nombre"], f["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2)
             
             if err or not s or not s.get("last_match"):
                 continue
@@ -73,44 +77,52 @@ async def vigilante_partidas():
             key = f"{nombre}#{tag}"
 
             if match_id and last_matches_cache.get(key) != match_id:
+                es_primera_vez = (last_matches_cache.get(key) is None)
+                
                 last_matches_cache[key] = match_id
                 save_last_matches(last_matches_cache)
 
-                if s["modo"].lower() not in ["competitive", "unrated"]:
+                if es_primera_vez:
                     continue
 
-                k = lm["kills"]
-                d = lm["deaths"]
-                acs = lm["acs"]
-                won = lm["won"]
+                # 🛑 ¡FILTRO DE MODOS ELIMINADO! 🛑
+                # Ahora avisa de CUALQUIER partida (Deathmatch, Spike Rush, Custom...)
+
+                k = lm.get("kills", 0)
+                d = lm.get("deaths", 1)
+                a = lm.get("assists", 0)
+                acs = lm.get("acs", 0)
+                won = lm.get("won", False)
+                
                 resultado = "VICTORIA" if won else "DERROTA"
+                color_borde = 0x00FF00 if won else 0xFF0000
 
                 nombre_real = s.get('nombre') or nombre
                 tag_real = s.get('tag') or tag
+                mapa = s.get('mapa', 'Desconocido')
+                modo_formateado = s.get('modo', 'Unrated').capitalize()
 
+                # TÍTULO ESTÁNDAR PARA CUALQUIER PARTIDA
+                title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}**."
+
+                # MODIFICADORES GRACIOSOS (Si destacan)
                 if k >= 25 or acs >= 300:
-                    embed = discord.Embed(
-                        title=f"🚨 ¡ALERTA DE CARREADA! 🚨",
-                        description=f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby en {s['mapa']}.",
-                        color=0x00FF00
-                    )
-                    embed.add_field(name="Resultado", value=resultado, inline=True)
-                    embed.add_field(name="K/D/A", value=f"{k}/{d}/{lm['assists']}", inline=True)
-                    embed.add_field(name="ACS", value=str(acs), inline=True)
-                    if s.get("card"): embed.set_thumbnail(url=s.get("card"))
-                    await canal.send(embed=embed)
+                    title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
+                    desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa}."
+                elif d > (k + 8) or acs < 130:
+                    title = f"🗑️ ¡Tenemos un infiltrado! 🗑️"
+                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa}."
 
-                elif d > (k + 10) or acs < 120:
-                    embed = discord.Embed(
-                        title=f"🗑️ ¡Tenemos un infiltrado de Hierro! 🗑️",
-                        description=f"El monitor de **{nombre_real}#{tag_real}** estaba apagado en {s['mapa']}.",
-                        color=0xFF0000
-                    )
-                    embed.add_field(name="Resultado", value=resultado, inline=True)
-                    embed.add_field(name="K/D/A", value=f"{k}/{d}/{lm['assists']}", inline=True)
-                    embed.add_field(name="ACS", value=str(acs), inline=True)
-                    if s.get("card"): embed.set_thumbnail(url=s.get("card"))
-                    await canal.send(embed=embed)
+                embed = discord.Embed(title=title, description=desc, color=color_borde)
+                embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
+                embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
+                embed.add_field(name="ACS", value=str(acs), inline=True)
+                
+                if s.get("card"): 
+                    embed.set_thumbnail(url=s.get("card"))
+                    
+                await canal.send(embed=embed)
 
 async def fetch_stats(nombre, tag, region="eu"):
     def _request():
@@ -118,7 +130,7 @@ async def fetch_stats(nombre, tag, region="eu"):
             r = requests.post(
                 f"{TRACKER_URL.rstrip('/')}/tracker",
                 json={"username": nombre, "tag": tag, "region": region},
-                timeout=15
+                timeout=30 
             )
             data = r.json()
             if not data.get("success"):
@@ -160,13 +172,10 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
-    # AQUÍ ESTÁ EL CAMBIO PARA LINEUPSVALORANT.COM
     top_agents = s.get("top_agents", [])
     if top_agents:
         agentes_str = " | ".join(top_agents)
-        # Mostramos los agentes que ha jugado
         embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
-        # Ponemos el enlace general limpio a la web
         embed.add_field(name="📚 Aprende setups", value="[Buscar en LineupsValorant.com](https://lineupsvalorant.com/)", inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
@@ -205,7 +214,7 @@ async def leaderboard(interaction: discord.Interaction):
     for amigo in friends[server_id]:
         s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
         
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2)
         
         if not err and s:
             scores.append(s)
@@ -231,7 +240,7 @@ async def leaderboard(interaction: discord.Interaction):
 
     if jugadores_fantasma:
         nombres_rotos = ", ".join(jugadores_fantasma)
-        embed.set_footer(text=f"⚠️ Sin datos (Revisa IDs o Rate Limit): {nombres_rotos}")
+        embed.set_footer(text=f"⚠️ Sin datos (Revisa IDs o Rate Limit de la API): {nombres_rotos}")
 
     await interaction.followup.send(embed=embed)
 
