@@ -32,8 +32,11 @@ def safe_get(url, headers):
         print(f"Error API: {e}")
         return {}
 
-def analyze_matches(matches, username, tag):
-    if not matches:
+# -------------------------------------------------------------
+# BALA DE PLATA: AHORA BUSCAMOS POR PUUID, NO POR NOMBRE
+# -------------------------------------------------------------
+def analyze_matches(matches, puuid):
+    if not matches or not puuid:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
 
     kills, deaths, assists, wins = 0, 0, 0, 0
@@ -47,11 +50,9 @@ def analyze_matches(matches, username, tag):
         players = m.get("players", {}).get("all_players", [])
         player = None
 
+        # Ya no comparamos strings, buscamos el ID exacto del jugador
         for p in players:
-            # FIX: Asegurarnos de que el nombre/tag no vengan como None antes de hacer .lower()
-            p_name = p.get("name") or ""
-            p_tag = p.get("tag") or ""
-            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
+            if p.get("puuid") == puuid:
                 player = p
                 break
 
@@ -64,7 +65,6 @@ def analyze_matches(matches, username, tag):
 
         stats = player.get("stats", {})
         
-        # FIX: Evitar que kills/deaths vengan como Null desde la API
         k = stats.get("kills") or 0
         d = stats.get("deaths") or 1
         a = stats.get("assists") or 0
@@ -89,7 +89,7 @@ def analyze_matches(matches, username, tag):
 
         kdas_history.append((k + a) / max(d, 1))
 
-        # FIX DEL CRASH: Deathmatch devuelve team=null. (player.get("team") or "") evita el error de .lower()
+        # Evitar crasheos con Deathmatch (equipo nulo)
         team = (player.get("team") or "").lower()
         teams = m.get("teams", {})
         if team and isinstance(teams, dict):
@@ -134,14 +134,22 @@ def obtener_stats(username, tag, region="eu"):
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
 
+    # 1. OBJETIVO PRIMORDIAL: SACAR EL PUUID
     acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
     acc = acc_json.get("data", {})
+    
+    puuid = acc.get("puuid")
+    # Guardamos su nombre real tal y como está en el juego
+    real_name = acc.get("name", username)
+    real_tag = acc.get("tag", tag)
 
+    # 2. RANGO
     mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
     mmr_data = mmr_json.get("data", {})
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
+    # 3. PARTIDAS
     match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
     matches = match_json.get("data", [])
 
@@ -151,16 +159,14 @@ def obtener_stats(username, tag, region="eu"):
     match_id = last_match.get("metadata", {}).get("matchid", "")
     
     last_match_info = {}
-    if last_match:
+    if last_match and puuid:
         players = last_match.get("players", {}).get("all_players", [])
         for p in players:
-            p_name = p.get("name") or ""
-            p_tag = p.get("tag") or ""
-            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
+            # Buscamos su DNI interno en la partida
+            if p.get("puuid") == puuid:
                 s = p.get("stats", {})
                 r = last_match.get("metadata", {}).get("rounds_played") or 1
                 
-                # FIX: Lo mismo aquí, evitamos crash si el equipo viene Null
                 team = (p.get("team") or "").lower()
                 won = last_match.get("teams", {}).get(team, {}).get("has_won", False) if team else False
                 
@@ -174,13 +180,14 @@ def obtener_stats(username, tag, region="eu"):
                 }
                 break
 
-    analysis = analyze_matches(matches, username, tag)    
+    # Pasamos el PUUID para el análisis global
+    analysis = analyze_matches(matches, puuid)    
 
     is_smurf = (analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]))
 
     stats = {
-        "nombre": acc.get("name", username),
-        "tag": acc.get("tag", tag),
+        "nombre": real_name,
+        "tag": real_tag,
         "nivel": acc.get("account_level", 0),
         "card": acc.get("card", {}).get("small", ""),
         "rank": rank,
@@ -214,6 +221,7 @@ async def tracker(request: Request):
 
     stats = obtener_stats(username, tag, region)
 
+    # Si no saca ni rango ni nivel, es que la cuenta no existe o está capada
     if stats["rank"] == "Unranked" and stats["nivel"] == 0:
         return {"success": False, "error": "Jugador no encontrado o perfil privado."}
 
