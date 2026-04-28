@@ -6,6 +6,7 @@ import os
 import logging
 import json
 import asyncio
+import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,7 +15,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
 FRIENDS_FILE = "amigos_valorant.json"
 LAST_MATCHES_FILE = "ultimas_partidas.json"
-STATS_CACHE_FILE = "stats_cache.json"
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
@@ -33,7 +33,6 @@ def save_json(file_path, data):
 
 last_matches_cache = load_json(LAST_MATCHES_FILE)
 friends = load_json(FRIENDS_FILE)
-stats_cache = load_json(STATS_CACHE_FILE) 
 
 @bot.event
 async def on_ready():
@@ -56,22 +55,16 @@ async def vigilante_partidas():
     for server_id, friend_list in friends.items():
         for f in friend_list:
             nombre, tag = f["nombre"], f["tag"]
-            key = f"{nombre}#{tag}"
-            
             s, err = await fetch_stats(nombre, tag)
             
-            # ⏱️ 15 SEGUNDOS DE ESPERA (Garantiza 0 Rate Limits en la API)
-            await asyncio.sleep(15)
+            await asyncio.sleep(2.5) # Respiro para no saturar la API
             
-            if err or not s:
+            if err or not s or not s.get("last_match"):
                 continue
-                
-            stats_cache[key] = s
-            save_json(STATS_CACHE_FILE, stats_cache)
 
-            lm = s.get("last_match")
-            if not lm: continue
+            lm = s["last_match"]
             match_id = lm.get("id")
+            key = f"{nombre}#{tag}"
 
             if match_id and last_matches_cache.get(key) != match_id:
                 es_primera_vez = (last_matches_cache.get(key) is None)
@@ -122,7 +115,7 @@ async def fetch_stats(nombre, tag, region="eu"):
             r = requests.post(
                 f"{TRACKER_URL.rstrip('/')}/tracker",
                 json={"username": nombre, "tag": tag, "region": region},
-                timeout=30 
+                timeout=25
             )
             data = r.json()
             if not data.get("success"):
@@ -142,10 +135,6 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     if err or not s:
         await interaction.followup.send(f"❌ Error: {err}")
         return
-        
-    key = f"{nombre}#{tag}"
-    stats_cache[key] = s
-    save_json(STATS_CACHE_FILE, stats_cache)
 
     nombre_perfil = s.get('nombre') or nombre
     tag_perfil = s.get('tag') or tag
@@ -172,7 +161,15 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     if top_agents:
         agentes_str = " | ".join(top_agents)
         embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
-        embed.add_field(name="📚 Aprende setups", value="[Buscar en LineupsValorant.com](https://lineupsvalorant.com/)", inline=False)
+        
+        # Enlaces seguros para lineupsvalorant.com
+        lineups_links = []
+        for agent in top_agents:
+            agente_formateado = urllib.parse.quote(agent)
+            url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
+            lineups_links.append(f"[{agent}]({url})")
+            
+        embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
     modo_str = s.get('modo', 'Desconocido')
@@ -193,7 +190,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 
     friends[server_id].append({"nombre": nombre, "tag": tag})
     save_json(FRIENDS_FILE, friends)
-    await interaction.response.send_message(f"✅ Añadido: **{nombre}#{tag}**. (Usa `/stats {nombre} {tag}` para meterlo rápido en el Leaderboard)")
+    await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
 
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 async def leaderboard(interaction: discord.Interaction):
@@ -203,19 +200,26 @@ async def leaderboard(interaction: discord.Interaction):
         await interaction.response.send_message("❌ No hay nadie en la lista. Usad `/add` primero.")
         return
 
+    # Usamos defer() para que Discord no aborte si el bot tarda unos segundos en leer todos los datos
+    await interaction.response.defer()
+    
     scores = []
     jugadores_fantasma = []
 
     for amigo in friends[server_id]:
-        key = f"{amigo['nombre']}#{amigo['tag']}"
-        if key in stats_cache:
-            scores.append(stats_cache[key])
+        s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
+        
+        # 2.5 Segundos entre peticiones: Suficiente para no hacer spam, rápido para no aburrir
+        await asyncio.sleep(2.5)
+        
+        if not err and s:
+            scores.append(s)
         else:
-            jugadores_fantasma.append(key)
+            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']}")
 
     if not scores:
-        msg = "❌ Aún no tengo datos. Dame unos minutos para escanear en segundo plano o usa el comando `/stats` con cada jugador."
-        await interaction.response.send_message(msg)
+        msg = "❌ No se pudieron cargar las stats de nadie."
+        await interaction.followup.send(msg)
         return
 
     scores.sort(key=lambda x: x.get("acs") if x.get("acs") is not None else 0, reverse=True)
@@ -232,8 +236,8 @@ async def leaderboard(interaction: discord.Interaction):
 
     if jugadores_fantasma:
         nombres_rotos = ", ".join(jugadores_fantasma)
-        embed.set_footer(text=f"⚠️ Escaneando en 2º plano a: {nombres_rotos}")
+        embed.set_footer(text=f"⚠️ Sin datos (Revisa IDs o hubo saturación API): {nombres_rotos}")
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 bot.run(TOKEN)
