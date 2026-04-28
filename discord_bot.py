@@ -197,7 +197,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 
     friends[server_id].append({"nombre": nombre, "tag": tag})
     save_friends(friends)
-    await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
+    await interaction.response.send_message(f"✅ Añadido a la tabla: **{nombre}#{tag}**")
 
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 async def leaderboard(interaction: discord.Interaction):
