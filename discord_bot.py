@@ -14,14 +14,13 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
 FRIENDS_FILE = "amigos_valorant.json"
 LAST_MATCHES_FILE = "ultimas_partidas.json"
-STATS_CACHE_FILE = "stats_cache.json" # NUEVO: Base de datos local para el Leaderboard
+STATS_CACHE_FILE = "stats_cache.json"
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 CANAL_ALERTAS_ID = 1496835339828990078 
 
-# --- GESTOR DE ARCHIVOS JSON ---
 def load_json(file_path):
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
@@ -34,7 +33,7 @@ def save_json(file_path, data):
 
 last_matches_cache = load_json(LAST_MATCHES_FILE)
 friends = load_json(FRIENDS_FILE)
-stats_cache = load_json(STATS_CACHE_FILE) # Cargamos la bbdd al iniciar
+stats_cache = load_json(STATS_CACHE_FILE) 
 
 @bot.event
 async def on_ready():
@@ -61,14 +60,12 @@ async def vigilante_partidas():
             
             s, err = await fetch_stats(nombre, tag)
             
-            # LA CLAVE DE TODO: 12 SEGUNDOS DE ESPERA.
-            # Al esperar, la API de Henrik nunca nos bloquea por spam.
-            await asyncio.sleep(12)
+            # ⏱️ 15 SEGUNDOS DE ESPERA (Garantiza 0 Rate Limits en la API)
+            await asyncio.sleep(15)
             
             if err or not s:
                 continue
                 
-            # GUARDAMOS SUS STATS EN LA BBDD LOCAL PARA EL LEADERBOARD
             stats_cache[key] = s
             save_json(STATS_CACHE_FILE, stats_cache)
 
@@ -146,7 +143,6 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         await interaction.followup.send(f"❌ Error: {err}")
         return
         
-    # FORZAR ACTUALIZACIÓN LOCAL AL PEDIR STATS MANUALES
     key = f"{nombre}#{tag}"
     stats_cache[key] = s
     save_json(STATS_CACHE_FILE, stats_cache)
@@ -210,7 +206,6 @@ async def leaderboard(interaction: discord.Interaction):
     scores = []
     jugadores_fantasma = []
 
-    # LEE LA BASE DE DATOS LOCAL, YA NO HACE PETICIONES A LA API (Carga en 0.1 segundos)
     for amigo in friends[server_id]:
         key = f"{amigo['nombre']}#{amigo['tag']}"
         if key in stats_cache:
@@ -239,7 +234,6 @@ async def leaderboard(interaction: discord.Interaction):
         nombres_rotos = ", ".join(jugadores_fantasma)
         embed.set_footer(text=f"⚠️ Escaneando en 2º plano a: {nombres_rotos}")
 
-    # No usamos defer(), responde al instante
     await interaction.response.send_message(embed=embed)
 
 bot.run(TOKEN)
