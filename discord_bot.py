@@ -19,7 +19,7 @@ LAST_MATCHES_FILE = "ultimas_partidas.json"
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
-CANAL_ALERTAS_ID = 1496835339828990078 
+CANAL_ALERTAS_ID = 1496883989867139102 
 
 def load_json(file_path):
     if os.path.exists(file_path):
