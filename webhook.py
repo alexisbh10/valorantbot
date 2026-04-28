@@ -3,6 +3,7 @@ import os
 import time
 from fastapi import FastAPI, HTTPException, Request
 from datetime import datetime
+from collections import Counter # <-- NUEVO: Para contar los agentes
 
 app = FastAPI()
 
@@ -14,7 +15,7 @@ cache = {}
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        if time.time() - ts < 120: # 2 minutos de caché para no saturar la API
+        if time.time() - ts < 120: 
             return data
     return None
 
@@ -33,15 +34,15 @@ def safe_get(url, headers):
         return {}
 
 # ---------------- REAL ANALYTICS ----------------
-# ---------------- REAL ANALYTICS (Arreglado Winrate) ----------------
 def analyze_matches(matches, username, tag):
     if not matches:
-        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0}
+        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "most_played_agent": "Desconocido", "top_agents": []}
 
     kills, deaths, assists, wins = 0, 0, 0, 0
     headshots, bodyshots, legshots = 0, 0, 0
     damage, rounds, score = 0, 0, 0
     kdas_history = []
+    agents_played = [] # <-- NUEVO: Guardaremos los agentes de cada partida
     total_matches = 0
 
     for m in matches[:10]:
@@ -55,6 +56,11 @@ def analyze_matches(matches, username, tag):
 
         if not player:
             continue
+
+        # Guardar el agente jugado
+        agent = player.get("character")
+        if agent:
+            agents_played.append(agent)
 
         stats = player.get("stats", {})
         
@@ -82,22 +88,19 @@ def analyze_matches(matches, username, tag):
 
         kdas_history.append((k + a) / max(d, 1))
 
-        # ARREGLO DEL WINRATE: Todo a minúsculas
         team = player.get("team", "").lower()
         teams = m.get("teams", {})
         if team and isinstance(teams, dict):
-            # Buscamos en red o blue
             if teams.get(team, {}).get("has_won"):
                 wins += 1
 
         total_matches += 1
 
     if total_matches == 0:
-        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0}
+        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "most_played_agent": "Desconocido", "top_agents": []}
 
     total_shots = headshots + bodyshots + legshots
     
-    # Tendencia
     trend = "Estable ➖"
     if len(kdas_history) >= 4:
         chronological = list(reversed(kdas_history))
@@ -107,13 +110,20 @@ def analyze_matches(matches, username, tag):
         if p2 > p1 + 0.3: trend = "Mejorando 📈"
         elif p2 < p1 - 0.3: trend = "Empeorando 📉"
 
+    # <-- NUEVO: Contar los agentes más jugados
+    agent_counts = Counter(agents_played)
+    top_agents = [agent for agent, count in agent_counts.most_common(3)]
+    most_played = top_agents[0] if top_agents else "Desconocido"
+
     return {
         "kda": round((kills + assists) / max(deaths, 1), 2),
         "winrate": round((wins / total_matches) * 100, 1),
         "trend": trend,
         "hs": round((headshots / max(total_shots, 1)) * 100, 1),
         "adr": round(damage / max(rounds, 1), 1),
-        "acs": round(score / max(rounds, 1), 1)
+        "acs": round(score / max(rounds, 1), 1),
+        "most_played_agent": most_played,
+        "top_agents": top_agents
     }
 
 # ---------------- CORE ----------------
@@ -135,7 +145,6 @@ def obtener_stats(username, tag, region="eu"):
     match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
     matches = match_json.get("data", [])
 
-    # Extraer datos específicos de la ÚLTIMA partida para las Alertas
     last_match = matches[0] if matches else {}
     mapa = last_match.get("metadata", {}).get("map", "Desconocido")
     modo = last_match.get("metadata", {}).get("mode", "Desconocido")
@@ -181,7 +190,9 @@ def obtener_stats(username, tag, region="eu"):
         "acs": analysis["acs"],
         "trend": analysis["trend"],
         "smurf": is_smurf,
-        "last_match": last_match_info # <-- Nuevo dato añadido aquí
+        "last_match": last_match_info,
+        "agent": analysis["most_played_agent"], # <-- NUEVO
+        "top_agents": analysis["top_agents"]    # <-- NUEVO
     }
 
     set_cache(key, stats)
