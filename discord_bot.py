@@ -162,7 +162,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     top_agents = s.get("top_agents", [])
     if top_agents:
         agentes_str = " | ".join(top_agents)
-        embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
+        #embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
         
         lineups_links = []
         for agent in top_agents:
