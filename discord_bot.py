@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord.ext import tasks
-import aiohttp # <-- CAMBIO CLAVE: Usamos aiohttp en lugar de requests
+import aiohttp
 import os
 import logging
 import json
@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 CANAL_ALERTAS_ID = 1496835339828990078 
-
 LAST_MATCHES_FILE = "ultimas_partidas.json"
 
 def load_last_matches():
@@ -32,7 +31,6 @@ def save_last_matches(data):
 
 last_matches_cache = load_last_matches()
 
-# ---------------- PERSISTENCIA ----------------
 def load_friends():
     if os.path.exists(FRIENDS_FILE):
         with open(FRIENDS_FILE, "r") as f:
@@ -45,7 +43,6 @@ def save_friends(data):
 
 friends = load_friends()
 
-# ---------------- READY ----------------
 @bot.event
 async def on_ready():
     print(f"✅ Bot listo: {bot.user}")
@@ -63,7 +60,7 @@ async def vigilante_partidas():
     for server_id, friend_list in friends.items():
         for f in friend_list:
             nombre, tag = f["nombre"], f["tag"]
-            s, err = await fetch_stats(nombre, tag) # <-- AHORA LLEVA AWAIT
+            s, err = await fetch_stats(nombre, tag)
             
             if err or not s or not s.get("last_match"):
                 continue
@@ -109,9 +106,7 @@ async def vigilante_partidas():
                     if s.get("card"): embed.set_thumbnail(url=s.get("card"))
                     await canal.send(embed=embed)
 
-# ---------------- REQUEST WRAPPER ASÍNCRONO ----------------
 async def fetch_stats(nombre, tag, region="eu"):
-    # REEMPLAZO DE REQUESTS POR AIOHTTP PARA NO BLOQUEAR EL BOT
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.post(
@@ -125,12 +120,11 @@ async def fetch_stats(nombre, tag, region="eu"):
     except Exception as e:
         return None, str(e)
 
-# ---------------- STATS COMMAND ----------------
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu"):
     await interaction.response.defer()
 
-    s, err = await fetch_stats(nombre, tag, region) # <-- AHORA LLEVA AWAIT
+    s, err = await fetch_stats(nombre, tag, region)
 
     if err or not s:
         await interaction.followup.send(f"❌ Error: {err}")
@@ -146,48 +140,36 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     if s.get("card"):
         embed.set_thumbnail(url=s.get("card"))
 
-    # Fila 1: Rango
     embed.add_field(name="🏆 Rango", value=f"**{s.get('rank')}** ({s.get('rr')} RR)", inline=True)
     embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
     embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
 
-    # Fila 2: Tiroteo
     embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
     embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
-    # NUEVO: Fila 3 - Agentes Jugados y Lineups
+    # MODIFICADO: Generador de enlaces para TODOS los agentes jugados
     top_agents = s.get("top_agents", [])
     if top_agents:
-        agentes_str = " | ".join(top_agents)
-        embed.add_field(name="🕵️ Agentes Top (Últ. 10)", value=f"**{agentes_str}**", inline=False)
-        
-        main_agent = top_agents[0]
-        # Diccionario para enviar a webs especializadas en lineups si el agente los necesita
-        lineups_url = {
-            "Sova": "https://strats.gg/valorant/lineups/sova",
-            "Viper": "https://strats.gg/valorant/lineups/viper",
-            "Brimstone": "https://strats.gg/valorant/lineups/brimstone",
-            "Killjoy": "https://strats.gg/valorant/lineups/killjoy",
-            "Cypher": "https://strats.gg/valorant/lineups/cypher",
-            "KAY/O": "https://strats.gg/valorant/lineups/kayo",
-            "Fade": "https://strats.gg/valorant/lineups/fade",
-            "Omen": "https://strats.gg/valorant/lineups/omen",
-            "Gekko": "https://strats.gg/valorant/lineups/gekko",
-            "Vyse": "https://strats.gg/valorant/lineups/vyse"
-        }.get(main_agent)
-        
-        if lineups_url:
-            embed.add_field(name=f"📚 Aprende setups con {main_agent}", value=f"[Ver Lineups en Strats.gg]({lineups_url})", inline=False)
-        else:
-            embed.add_field(name=f"📚 Aprende a jugar {main_agent}", value=f"[Buscar guías en YouTube](https://www.youtube.com/results?search_query=valorant+{main_agent}+guide)", inline=False)
+        lineups_links = []
+        for agent in top_agents:
+            # Quitamos barras para casos como KAY/O -> kayo y pasamos a minúsculas
+            agente_formateado = agent.lower().replace("/", "") 
+            
+            # Construimos la URL apuntando a la web que has pasado
+            # (Si en la web la ruta exacta es otra, solo cambia el "/agent/" de abajo)
+            url = f"https://lineupsvalorant.com/agent/{agente_formateado}"
+            lineups_links.append(f"[{agent}]({url})")
+            
+        embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
-    embed.set_footer(text=f"Última partida: {s.get('modo')} en {s.get('mapa')} • {estado}")
+    modo_str = s.get('modo', 'Desconocido')
+    mapa_str = s.get('mapa', 'Desconocido')
+    embed.set_footer(text=f"Última partida: {modo_str} en {mapa_str} • {estado}")
 
     await interaction.followup.send(embed=embed)
 
-# ---------------- AÑADIR AMIGO ----------------
 @bot.tree.command(name="add", description="Guarda a un colega en la lista del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
     server_id = str(interaction.guild_id)
@@ -202,7 +184,6 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
     save_friends(friends)
     await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
 
-# ---------------- LEADERBOARD ----------------
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 async def leaderboard(interaction: discord.Interaction):
     server_id = str(interaction.guild_id)
@@ -213,14 +194,20 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.defer()
     scores = []
+    jugadores_fantasma = [] 
 
     for amigo in friends[server_id]:
-        s, err = await fetch_stats(amigo["nombre"], amigo["tag"]) # <-- AHORA LLEVA AWAIT
+        s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
         if not err and s:
             scores.append(s)
+        else:
+            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']}")
 
     if not scores:
-        await interaction.followup.send("❌ No se pudieron cargar las stats de nadie.")
+        msg = "❌ Nadie tiene datos recientes."
+        if jugadores_fantasma:
+            msg += f" Posibles Riot IDs cambiados: {', '.join(jugadores_fantasma)}"
+        await interaction.followup.send(msg)
         return
 
     scores.sort(key=lambda x: x.get("acs") if x.get("acs") is not None else 0, reverse=True)
@@ -228,12 +215,14 @@ async def leaderboard(interaction: discord.Interaction):
     
     for i, p in enumerate(scores):
         medalla = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🔹"
-        # Incluimos al Main en el Leaderboard
         main_agent = p.get('agent', 'Desconocido')
         stats_txt = f"**ACS:** {p.get('acs')} | **KDA:** {p.get('kda')} | **Rank:** {p.get('rank')}"
         embed.add_field(name=f"{medalla} {p.get('nombre')}#{p.get('tag')} ({main_agent})", value=stats_txt, inline=False)
 
+    if jugadores_fantasma:
+        nombres_rotos = ", ".join(jugadores_fantasma)
+        embed.set_footer(text=f"⚠️ Sin datos (Riot ID cambiado o inactivos): {nombres_rotos}")
+
     await interaction.followup.send(embed=embed)
 
-# ---------------- RUN ----------------
 bot.run(TOKEN)

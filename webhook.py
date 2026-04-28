@@ -2,8 +2,7 @@ import requests
 import os
 import time
 from fastapi import FastAPI, HTTPException, Request
-from datetime import datetime
-from collections import Counter # <-- NUEVO: Para contar los agentes
+from collections import Counter
 
 app = FastAPI()
 
@@ -11,7 +10,6 @@ HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
 
 cache = {}
 
-# ---------------- CACHE ----------------
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
@@ -22,7 +20,6 @@ def get_cache(k):
 def set_cache(k, v):
     cache[k] = (v, time.time())
 
-# ---------------- SAFE REQUEST ----------------
 def safe_get(url, headers):
     try:
         r = requests.get(url, headers=headers, timeout=10)
@@ -33,7 +30,6 @@ def safe_get(url, headers):
         print(f"Error API: {e}")
         return {}
 
-# ---------------- REAL ANALYTICS ----------------
 def analyze_matches(matches, username, tag):
     if not matches:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "most_played_agent": "Desconocido", "top_agents": []}
@@ -42,7 +38,7 @@ def analyze_matches(matches, username, tag):
     headshots, bodyshots, legshots = 0, 0, 0
     damage, rounds, score = 0, 0, 0
     kdas_history = []
-    agents_played = [] # <-- NUEVO: Guardaremos los agentes de cada partida
+    agents_played = []
     total_matches = 0
 
     for m in matches[:10]:
@@ -57,7 +53,6 @@ def analyze_matches(matches, username, tag):
         if not player:
             continue
 
-        # Guardar el agente jugado
         agent = player.get("character")
         if agent:
             agents_played.append(agent)
@@ -110,9 +105,9 @@ def analyze_matches(matches, username, tag):
         if p2 > p1 + 0.3: trend = "Mejorando 📈"
         elif p2 < p1 - 0.3: trend = "Empeorando 📉"
 
-    # <-- NUEVO: Contar los agentes más jugados
     agent_counts = Counter(agents_played)
-    top_agents = [agent for agent, count in agent_counts.most_common(3)]
+    # MODIFICADO: Sacamos TODOS los agentes que ha jugado, ordenados por los que más ha repetido
+    top_agents = [agent for agent, count in agent_counts.most_common()]
     most_played = top_agents[0] if top_agents else "Desconocido"
 
     return {
@@ -126,7 +121,6 @@ def analyze_matches(matches, username, tag):
         "top_agents": top_agents
     }
 
-# ---------------- CORE ----------------
 def obtener_stats(username, tag, region="eu"):
     key = f"{username.lower()}#{tag.lower()}"
     cached = get_cache(key)
@@ -136,6 +130,9 @@ def obtener_stats(username, tag, region="eu"):
 
     acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
     acc = acc_json.get("data", {})
+    
+    if not acc:
+        return None
 
     mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
     mmr_data = mmr_json.get("data", {})
@@ -191,14 +188,13 @@ def obtener_stats(username, tag, region="eu"):
         "trend": analysis["trend"],
         "smurf": is_smurf,
         "last_match": last_match_info,
-        "agent": analysis["most_played_agent"], # <-- NUEVO
-        "top_agents": analysis["top_agents"]    # <-- NUEVO
+        "agent": analysis["most_played_agent"],
+        "top_agents": analysis["top_agents"]
     }
 
     set_cache(key, stats)
     return stats
 
-# ---------------- ENDPOINT ----------------
 @app.post("/tracker")
 async def tracker(request: Request):
     body = await request.json()
@@ -211,7 +207,7 @@ async def tracker(request: Request):
 
     stats = obtener_stats(username, tag, region)
 
-    if stats["rank"] == "Unranked" and stats["nivel"] == 0:
-        return {"success": False, "error": "Jugador no encontrado o perfil privado."}
+    if not stats:
+        return {"success": False, "error": "Riot ID no encontrado. Probablemente ha cambiado su Nombre#Tag."}
 
     return {"success": True, "stats": stats}
