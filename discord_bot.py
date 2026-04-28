@@ -57,7 +57,8 @@ async def vigilante_partidas():
             nombre, tag = f["nombre"], f["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            await asyncio.sleep(2.5) # Respiro para no saturar la API
+            # 4 segundos de pausa en background para no llamar NUNCA la atención de la API
+            await asyncio.sleep(4) 
             
             if err or not s or not s.get("last_match"):
                 continue
@@ -115,7 +116,7 @@ async def fetch_stats(nombre, tag, region="eu"):
             r = requests.post(
                 f"{TRACKER_URL.rstrip('/')}/tracker",
                 json={"username": nombre, "tag": tag, "region": region},
-                timeout=25
+                timeout=30
             )
             data = r.json()
             if not data.get("success"):
@@ -133,7 +134,8 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     s, err = await fetch_stats(nombre, tag, region)
 
     if err or not s:
-        await interaction.followup.send(f"❌ Error: {err}")
+        # AHORA TE DARÁ EL ERROR REAL Y SABRÁS QUÉ PASA
+        await interaction.followup.send(f"❌ Fallo al buscar a {nombre}#{tag}: {err}")
         return
 
     nombre_perfil = s.get('nombre') or nombre
@@ -162,7 +164,6 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         agentes_str = " | ".join(top_agents)
         embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
         
-        # Enlaces seguros para lineupsvalorant.com
         lineups_links = []
         for agent in top_agents:
             agente_formateado = urllib.parse.quote(agent)
@@ -200,7 +201,6 @@ async def leaderboard(interaction: discord.Interaction):
         await interaction.response.send_message("❌ No hay nadie en la lista. Usad `/add` primero.")
         return
 
-    # Usamos defer() para que Discord no aborte si el bot tarda unos segundos en leer todos los datos
     await interaction.response.defer()
     
     scores = []
@@ -209,13 +209,14 @@ async def leaderboard(interaction: discord.Interaction):
     for amigo in friends[server_id]:
         s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
         
-        # 2.5 Segundos entre peticiones: Suficiente para no hacer spam, rápido para no aburrir
-        await asyncio.sleep(2.5)
+        # EL SECRETO ESTÁ AQUÍ. Si pide muy rápido, Riot corta a partir del 3º.
+        await asyncio.sleep(3) 
         
         if not err and s:
             scores.append(s)
         else:
-            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']}")
+            # Si a pesar de todo la API falla, ahora sabrás el motivo exacto entre paréntesis
+            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']} ({err})")
 
     if not scores:
         msg = "❌ No se pudieron cargar las stats de nadie."
@@ -235,8 +236,8 @@ async def leaderboard(interaction: discord.Interaction):
         embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
 
     if jugadores_fantasma:
-        nombres_rotos = ", ".join(jugadores_fantasma)
-        embed.set_footer(text=f"⚠️ Sin datos (Revisa IDs o hubo saturación API): {nombres_rotos}")
+        nombres_rotos = "\n".join(jugadores_fantasma)
+        embed.add_field(name="⚠️ Sin datos o Errores de API:", value=f"```\n{nombres_rotos}\n```", inline=False)
 
     await interaction.followup.send(embed=embed)
 

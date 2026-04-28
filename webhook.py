@@ -14,7 +14,7 @@ cache = {}
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        if time.time() - ts < 120: 
+        if time.time() - ts < 300: # 5 minutos de caché
             return data
     return None
 
@@ -23,18 +23,19 @@ def set_cache(k, v):
 
 def safe_get(url, headers):
     try:
-        r = requests.get(url, headers=headers, timeout=12)
-        if r.status_code == 200:
-            return r.json()
-        elif r.status_code == 429:
-            print(f"⚠️ RATE LIMIT (429) alcanzado en la API: {url}")
-        return {}
+        # 20 SEGUNDOS de paciencia. El historial de partidas a veces tarda en cargar.
+        r = requests.get(url, headers=headers, timeout=20)
+        try:
+            data = r.json()
+        except:
+            data = {}
+        return r.status_code, data
+    except requests.exceptions.Timeout:
+        return 408, {}
     except Exception as e:
-        print(f"Error API: {e}")
-        return {}
+        return 500, {}
 
-# VUELTA AL MOTOR DE BÚSQUEDA ORIGINAL (POR TEXTO)
-def analyze_matches(matches, username, tag):
+def analyze_matches(matches, puuid, username, tag):
     if not matches:
         return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
 
@@ -50,9 +51,12 @@ def analyze_matches(matches, username, tag):
         player = None
 
         for p in players:
+            p_puuid = p.get("puuid")
             p_name = p.get("name", "")
             p_tag = p.get("tag", "")
-            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
+            
+            # DOBLE FILTRO: Busca por PUUID exacto o por Nombre+Tag (Lo que funcione)
+            if (puuid and p_puuid == puuid) or (p_name.lower() == username.lower() and p_tag.lower() == tag.lower()):
                 player = p
                 break
 
@@ -89,7 +93,7 @@ def analyze_matches(matches, username, tag):
 
         kdas_history.append((k + a) / max(d, 1))
 
-        # Evitamos el error si juegan Deathmatch (equipo sin nombre)
+        # Evita cuelgues si juegan un modo raro como Deathmatch
         team = (player.get("team") or "").lower()
         teams = m.get("teams", {})
         if team and isinstance(teams, dict):
@@ -130,22 +134,42 @@ def analyze_matches(matches, username, tag):
 def obtener_stats(username, tag, region="eu"):
     key = f"{username.lower()}#{tag.lower()}"
     cached = get_cache(key)
-    if cached: return cached
+    if cached: return cached, None
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
-
     safe_user = urllib.parse.quote(username)
     safe_tag = urllib.parse.quote(tag)
 
-    acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
-    acc = acc_json.get("data", {})
+    # 1. OBTIENE LA CUENTA
+    acc_status, acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
+    if acc_status == 429: return None, "Rate Limit (La API de Riot está saturada)"
+    if acc_status == 404: return None, "Jugador no encontrado (Riot ID cambiado o erróneo)"
+    if acc_status != 200: return None, f"Error cargando cuenta (HTTP {acc_status})"
 
-    mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
-    mmr_data = mmr_json.get("data", {})
+    acc = acc_json.get("data", {})
+    puuid = acc.get("puuid")
+    real_name = acc.get("name") or username
+    real_tag = acc.get("tag") or tag
+
+    # 2. OBTIENE EL RANGO
+    mmr_status, mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
+    mmr_data = mmr_json.get("data", {}) if mmr_status == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
-    match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10", headers)
+    # 3. OBTIENE EL HISTORIAL
+    if puuid:
+        match_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{region}/{puuid}?size=10"
+    else:
+        match_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10"
+
+    match_status, match_json = safe_get(match_url, headers)
+    
+    # 🛑 AQUÍ ESTABA EL FALLO: Si esto fallaba, antes devolvía ceros. Ahora bloquea y avisa del error.
+    if match_status == 429: return None, "Rate Limit de Riot (Espera unos minutos)"
+    if match_status == 408: return None, "Timeout (La API tardó demasiado en responder)"
+    if match_status != 200: return None, f"Error cargando el historial de partidas (HTTP {match_status})"
+
     matches = match_json.get("data", [])
 
     last_match = matches[0] if matches else {}
@@ -157,9 +181,11 @@ def obtener_stats(username, tag, region="eu"):
     if last_match:
         players = last_match.get("players", {}).get("all_players", [])
         for p in players:
+            p_puuid = p.get("puuid")
             p_name = p.get("name", "")
             p_tag = p.get("tag", "")
-            if p_name.lower() == username.lower() and p_tag.lower() == tag.lower():
+            
+            if (puuid and p_puuid == puuid) or (p_name.lower() == username.lower() and p_tag.lower() == tag.lower()):
                 s = p.get("stats", {})
                 r = last_match.get("metadata", {}).get("rounds_played", 1)
                 
@@ -176,13 +202,13 @@ def obtener_stats(username, tag, region="eu"):
                 }
                 break
 
-    analysis = analyze_matches(matches, username, tag)    
+    analysis = analyze_matches(matches, puuid, username, tag)    
 
     is_smurf = (analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]))
 
     stats = {
-        "nombre": acc.get("name") or username,
-        "tag": acc.get("tag") or tag,
+        "nombre": real_name,
+        "tag": real_tag,
         "nivel": acc.get("account_level", 0),
         "card": acc.get("card", {}).get("small", ""),
         "rank": rank,
@@ -202,7 +228,7 @@ def obtener_stats(username, tag, region="eu"):
     }
 
     set_cache(key, stats)
-    return stats
+    return stats, None
 
 @app.post("/tracker")
 async def tracker(request: Request):
@@ -214,9 +240,9 @@ async def tracker(request: Request):
     if not username or not tag:
         raise HTTPException(status_code=400, detail="Falta username o tag")
 
-    stats = obtener_stats(username, tag, region)
+    stats, err = obtener_stats(username, tag, region)
 
-    if stats["rank"] == "Unranked" and stats["nivel"] == 0:
-        return {"success": False, "error": "Jugador no encontrado o perfil privado."}
+    if err:
+        return {"success": False, "error": err}
 
     return {"success": True, "stats": stats}
