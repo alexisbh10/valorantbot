@@ -1,7 +1,6 @@
 import requests
 import os
 import time
-import urllib.parse
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
 
@@ -21,20 +20,21 @@ def get_cache(k):
 def set_cache(k, v):
     cache[k] = (v, time.time())
 
-# MODIFICADO: Ahora devuelve el código de estado HTTP para saber qué ha pasado
 def safe_get(url, headers):
     try:
-        r = requests.get(url, headers=headers, timeout=12) # Subimos el timeout a 12s
-        return r.status_code, r.json()
-    except requests.exceptions.Timeout:
-        return 408, {}
+        r = requests.get(url, headers=headers, timeout=12)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 429:
+            print(f"⚠️ RATE LIMIT (429) alcanzado en la API: {url}")
+        return {}
     except Exception as e:
         print(f"Error API: {e}")
-        return 500, {}
+        return {}
 
 def analyze_matches(matches, username, tag):
     if not matches:
-        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "most_played_agent": "Desconocido", "top_agents": []}
+        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
 
     kills, deaths, assists, wins = 0, 0, 0, 0
     headshots, bodyshots, legshots = 0, 0, 0
@@ -94,7 +94,7 @@ def analyze_matches(matches, username, tag):
         total_matches += 1
 
     if total_matches == 0:
-        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "most_played_agent": "Desconocido", "top_agents": []}
+        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
 
     total_shots = headshots + bodyshots + legshots
     
@@ -118,45 +118,27 @@ def analyze_matches(matches, username, tag):
         "hs": round((headshots / max(total_shots, 1)) * 100, 1),
         "adr": round(damage / max(rounds, 1), 1),
         "acs": round(score / max(rounds, 1), 1),
-        "most_played_agent": most_played,
+        "agent": most_played,
         "top_agents": top_agents
     }
 
 def obtener_stats(username, tag, region="eu"):
     key = f"{username.lower()}#{tag.lower()}"
     cached = get_cache(key)
-    if cached: return cached, None
+    if cached: return cached
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
 
-    # MODIFICADO: Codificamos los espacios para la URL
-    safe_user = urllib.parse.quote(username)
-    safe_tag = urllib.parse.quote(tag)
-
-    status, acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
-    
-    # Manejo estricto de los códigos de error
-    if status == 404:
-        return None, "Riot ID no encontrado (Error 404). Verifica que esté bien escrito."
-    elif status == 429:
-        return None, "La API está saturada (Error 429 - Rate Limit). Inténtalo en unos minutos."
-    elif status == 408:
-        return None, "La API ha tardado demasiado en responder (Timeout)."
-    elif status != 200:
-        return None, f"Error en la API de Valorant (Status {status})."
-
+    acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
     acc = acc_json.get("data", {})
-    if not acc:
-        return None, "Respuesta vacía de la API."
 
-    # Intentamos obtener MMR y Partidas (Si fallan, pasamos datos vacíos en vez de tirar error completo)
-    status_mmr, mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
-    mmr_data = mmr_json.get("data", {}) if status_mmr == 200 else {}
+    mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
+    mmr_data = mmr_json.get("data", {})
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
-    status_match, match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10", headers)
-    matches = match_json.get("data", []) if status_match == 200 else []
+    match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
+    matches = match_json.get("data", [])
 
     last_match = matches[0] if matches else {}
     mapa = last_match.get("metadata", {}).get("map", "Desconocido")
@@ -204,12 +186,12 @@ def obtener_stats(username, tag, region="eu"):
         "trend": analysis["trend"],
         "smurf": is_smurf,
         "last_match": last_match_info,
-        "agent": analysis["most_played_agent"],
-        "top_agents": analysis["top_agents"]
+        "agent": analysis.get("agent", "Desconocido"),
+        "top_agents": analysis.get("top_agents", [])
     }
 
     set_cache(key, stats)
-    return stats, None
+    return stats
 
 @app.post("/tracker")
 async def tracker(request: Request):
@@ -221,9 +203,9 @@ async def tracker(request: Request):
     if not username or not tag:
         raise HTTPException(status_code=400, detail="Falta username o tag")
 
-    stats, err = obtener_stats(username, tag, region)
+    stats = obtener_stats(username, tag, region)
 
-    if err:
-        return {"success": False, "error": err}
+    if stats["rank"] == "Unranked" and stats["nivel"] == 0:
+        return {"success": False, "error": "Jugador no encontrado o perfil privado."}
 
     return {"success": True, "stats": stats}

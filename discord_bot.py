@@ -1,10 +1,11 @@
 import discord
 from discord.ext import commands
 from discord.ext import tasks
-import aiohttp
+import requests
 import os
 import logging
 import json
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -62,6 +63,9 @@ async def vigilante_partidas():
             nombre, tag = f["nombre"], f["tag"]
             s, err = await fetch_stats(nombre, tag)
             
+            # PAUSA PARA EVITAR QUE LA API NOS Banee TEMPORALMENTE (Rate Limit)
+            await asyncio.sleep(1.5)
+            
             if err or not s or not s.get("last_match"):
                 continue
 
@@ -106,19 +110,24 @@ async def vigilante_partidas():
                     if s.get("card"): embed.set_thumbnail(url=s.get("card"))
                     await canal.send(embed=embed)
 
+# ---------------- REQUEST WRAPPER CLÁSICO PERO SEGURO ----------------
 async def fetch_stats(nombre, tag, region="eu"):
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.post(
+    def _request():
+        try:
+            r = requests.post(
                 f"{TRACKER_URL.rstrip('/')}/tracker",
-                json={"username": nombre, "tag": tag, "region": region}
-            ) as r:
-                data = await r.json()
-                if not data.get("success"):
-                    return None, data.get("error", "Error desconocido de la API")
-                return data.get("stats", {}), None
-    except Exception as e:
-        return None, str(e)
+                json={"username": nombre, "tag": tag, "region": region},
+                timeout=15
+            )
+            data = r.json()
+            if not data.get("success"):
+                return None, data.get("error", "Error desconocido de la API")
+            return data.get("stats", {}), None
+        except Exception as e:
+            return None, str(e)
+    
+    # Esto ejecuta tu código original sin congelar a Discord
+    return await asyncio.to_thread(_request)
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu"):
@@ -148,6 +157,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
+    # LOS ENLACES DE LINEUPS EXACTAMENTE COMO LOS PEDISTE
     top_agents = s.get("top_agents", [])
     if top_agents:
         lineups_links = []
@@ -189,20 +199,21 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.defer()
     scores = []
-    jugadores_fantasma = [] 
+    jugadores_fantasma = []
 
     for amigo in friends[server_id]:
         s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
+        
+        # OTRA PAUSA AQUÍ PARA NO SATURAR EL LEADERBOARD
+        await asyncio.sleep(1.5)
+        
         if not err and s:
             scores.append(s)
         else:
-            # AHORA EL BOT INCLUYE EL ERROR REAL QUE RECIBE DEL WEBHOOK
-            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']} ({err})")
+            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']}")
 
     if not scores:
-        msg = "❌ Nadie tiene datos recientes."
-        if jugadores_fantasma:
-            msg += f" \nErrores detectados:\n" + "\n".join(jugadores_fantasma)
+        msg = "❌ No se pudieron cargar las stats de nadie. Revisa los nombres o espera un poco."
         await interaction.followup.send(msg)
         return
 
@@ -216,8 +227,8 @@ async def leaderboard(interaction: discord.Interaction):
         embed.add_field(name=f"{medalla} {p.get('nombre')}#{p.get('tag')} ({main_agent})", value=stats_txt, inline=False)
 
     if jugadores_fantasma:
-        nombres_rotos = " | ".join(jugadores_fantasma)
-        embed.set_footer(text=f"⚠️ Errores: {nombres_rotos}")
+        nombres_rotos = ", ".join(jugadores_fantasma)
+        embed.set_footer(text=f"⚠️ Sin datos (Revisa IDs o Rate Limit): {nombres_rotos}")
 
     await interaction.followup.send(embed=embed)
 
