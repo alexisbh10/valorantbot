@@ -148,16 +148,11 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
-    # MODIFICADO: Generador de enlaces para TODOS los agentes jugados
     top_agents = s.get("top_agents", [])
     if top_agents:
         lineups_links = []
         for agent in top_agents:
-            # Quitamos barras para casos como KAY/O -> kayo y pasamos a minúsculas
             agente_formateado = agent.lower().replace("/", "") 
-            
-            # Construimos la URL apuntando a la web que has pasado
-            # (Si en la web la ruta exacta es otra, solo cambia el "/agent/" de abajo)
             url = f"https://lineupsvalorant.com/agent/{agente_formateado}"
             lineups_links.append(f"[{agent}]({url})")
             
@@ -201,12 +196,13 @@ async def leaderboard(interaction: discord.Interaction):
         if not err and s:
             scores.append(s)
         else:
-            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']}")
+            # AHORA EL BOT INCLUYE EL ERROR REAL QUE RECIBE DEL WEBHOOK
+            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']} ({err})")
 
     if not scores:
         msg = "❌ Nadie tiene datos recientes."
         if jugadores_fantasma:
-            msg += f" Posibles Riot IDs cambiados: {', '.join(jugadores_fantasma)}"
+            msg += f" \nErrores detectados:\n" + "\n".join(jugadores_fantasma)
         await interaction.followup.send(msg)
         return
 
@@ -220,8 +216,8 @@ async def leaderboard(interaction: discord.Interaction):
         embed.add_field(name=f"{medalla} {p.get('nombre')}#{p.get('tag')} ({main_agent})", value=stats_txt, inline=False)
 
     if jugadores_fantasma:
-        nombres_rotos = ", ".join(jugadores_fantasma)
-        embed.set_footer(text=f"⚠️ Sin datos (Riot ID cambiado o inactivos): {nombres_rotos}")
+        nombres_rotos = " | ".join(jugadores_fantasma)
+        embed.set_footer(text=f"⚠️ Errores: {nombres_rotos}")
 
     await interaction.followup.send(embed=embed)
 

@@ -1,6 +1,7 @@
 import requests
 import os
 import time
+import urllib.parse
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
 
@@ -20,15 +21,16 @@ def get_cache(k):
 def set_cache(k, v):
     cache[k] = (v, time.time())
 
+# MODIFICADO: Ahora devuelve el código de estado HTTP para saber qué ha pasado
 def safe_get(url, headers):
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        return {}
+        r = requests.get(url, headers=headers, timeout=12) # Subimos el timeout a 12s
+        return r.status_code, r.json()
+    except requests.exceptions.Timeout:
+        return 408, {}
     except Exception as e:
         print(f"Error API: {e}")
-        return {}
+        return 500, {}
 
 def analyze_matches(matches, username, tag):
     if not matches:
@@ -106,7 +108,6 @@ def analyze_matches(matches, username, tag):
         elif p2 < p1 - 0.3: trend = "Empeorando 📉"
 
     agent_counts = Counter(agents_played)
-    # MODIFICADO: Sacamos TODOS los agentes que ha jugado, ordenados por los que más ha repetido
     top_agents = [agent for agent, count in agent_counts.most_common()]
     most_played = top_agents[0] if top_agents else "Desconocido"
 
@@ -124,23 +125,38 @@ def analyze_matches(matches, username, tag):
 def obtener_stats(username, tag, region="eu"):
     key = f"{username.lower()}#{tag.lower()}"
     cached = get_cache(key)
-    if cached: return cached
+    if cached: return cached, None
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
 
-    acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{username}/{tag}", headers)
-    acc = acc_json.get("data", {})
-    
-    if not acc:
-        return None
+    # MODIFICADO: Codificamos los espacios para la URL
+    safe_user = urllib.parse.quote(username)
+    safe_tag = urllib.parse.quote(tag)
 
-    mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{username}/{tag}", headers)
-    mmr_data = mmr_json.get("data", {})
+    status, acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
+    
+    # Manejo estricto de los códigos de error
+    if status == 404:
+        return None, "Riot ID no encontrado (Error 404). Verifica que esté bien escrito."
+    elif status == 429:
+        return None, "La API está saturada (Error 429 - Rate Limit). Inténtalo en unos minutos."
+    elif status == 408:
+        return None, "La API ha tardado demasiado en responder (Timeout)."
+    elif status != 200:
+        return None, f"Error en la API de Valorant (Status {status})."
+
+    acc = acc_json.get("data", {})
+    if not acc:
+        return None, "Respuesta vacía de la API."
+
+    # Intentamos obtener MMR y Partidas (Si fallan, pasamos datos vacíos en vez de tirar error completo)
+    status_mmr, mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
+    mmr_data = mmr_json.get("data", {}) if status_mmr == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
 
-    match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{username}/{tag}?size=10", headers)
-    matches = match_json.get("data", [])
+    status_match, match_json = safe_get(f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10", headers)
+    matches = match_json.get("data", []) if status_match == 200 else []
 
     last_match = matches[0] if matches else {}
     mapa = last_match.get("metadata", {}).get("map", "Desconocido")
@@ -193,7 +209,7 @@ def obtener_stats(username, tag, region="eu"):
     }
 
     set_cache(key, stats)
-    return stats
+    return stats, None
 
 @app.post("/tracker")
 async def tracker(request: Request):
@@ -205,9 +221,9 @@ async def tracker(request: Request):
     if not username or not tag:
         raise HTTPException(status_code=400, detail="Falta username o tag")
 
-    stats = obtener_stats(username, tag, region)
+    stats, err = obtener_stats(username, tag, region)
 
-    if not stats:
-        return {"success": False, "error": "Riot ID no encontrado. Probablemente ha cambiado su Nombre#Tag."}
+    if err:
+        return {"success": False, "error": err}
 
     return {"success": True, "stats": stats}
