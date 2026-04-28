@@ -67,7 +67,8 @@ async def vigilante_partidas():
             nombre, tag = f["nombre"], f["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            await asyncio.sleep(2)
+            # SUBIDO A 5 SEGUNDOS PARA BURLAR EL ANTI-SPAM DE RIOT
+            await asyncio.sleep(5)
             
             if err or not s or not s.get("last_match"):
                 continue
@@ -85,9 +86,6 @@ async def vigilante_partidas():
                 if es_primera_vez:
                     continue
 
-                # 🛑 ¡FILTRO DE MODOS ELIMINADO! 🛑
-                # Ahora avisa de CUALQUIER partida (Deathmatch, Spike Rush, Custom...)
-
                 k = lm.get("kills", 0)
                 d = lm.get("deaths", 1)
                 a = lm.get("assists", 0)
@@ -102,11 +100,9 @@ async def vigilante_partidas():
                 mapa = s.get('mapa', 'Desconocido')
                 modo_formateado = s.get('modo', 'Unrated').capitalize()
 
-                # TÍTULO ESTÁNDAR PARA CUALQUIER PARTIDA
                 title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
                 desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}**."
 
-                # MODIFICADORES GRACIOSOS (Si destacan)
                 if k >= 25 or acs >= 300:
                     title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
                     desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa}."
@@ -197,7 +193,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 
     friends[server_id].append({"nombre": nombre, "tag": tag})
     save_friends(friends)
-    await interaction.response.send_message(f"✅ Añadido a la tabla: **{nombre}#{tag}**")
+    await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
 
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 async def leaderboard(interaction: discord.Interaction):
@@ -214,7 +210,8 @@ async def leaderboard(interaction: discord.Interaction):
     for amigo in friends[server_id]:
         s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
         
-        await asyncio.sleep(2)
+        # SUBIDO A 5 SEGUNDOS PARA EL LEADERBOARD
+        await asyncio.sleep(5)
         
         if not err and s:
             scores.append(s)

@@ -14,7 +14,6 @@ cache = {}
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        # CACHÉ A 180 SEGS (3 MINS): El equilibrio perfecto entre Leaderboard rápido y Alertas frescas
         if time.time() - ts < 180: 
             return data
     return None
@@ -28,7 +27,7 @@ def safe_get(url, headers):
         if r.status_code == 200:
             return r.json()
         elif r.status_code == 429:
-            print(f"⚠️ RATE LIMIT (429) alcanzado en la API: {url}")
+            print(f"⚠️ RATE LIMIT (429) en: {url}")
         return {}
     except Exception as e:
         print(f"Error API: {e}")
@@ -137,6 +136,10 @@ def obtener_stats(username, tag, region="eu"):
     acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
     acc = acc_json.get("data", {})
     
+    # ¡LA CLAVE ESTÁ AQUÍ! Si la API falla por Rate Limit, devolvemos None para no envenenar la caché.
+    if not acc:
+        return None
+
     puuid = acc.get("puuid")
     real_name = acc.get("name") or username
     real_tag = acc.get("tag") or tag
@@ -215,7 +218,10 @@ async def tracker(request: Request):
 
     stats = obtener_stats(username, tag, region)
 
+    if not stats:
+        return {"success": False, "error": "Rate Limit de la API o usuario no encontrado. Reintenta en unos segundos."}
+
     if stats["rank"] == "Unranked" and stats["nivel"] == 0:
-        return {"success": False, "error": "Jugador no encontrado o perfil privado."}
+        return {"success": False, "error": "Perfil privado o sin datos recientes."}
 
     return {"success": True, "stats": stats}
