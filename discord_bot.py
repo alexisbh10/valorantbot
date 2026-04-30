@@ -4,39 +4,28 @@ from discord.ext import tasks
 import requests
 import os
 import logging
-import json
 import asyncio
 import urllib.parse
+import asyncpg
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
-FRIENDS_FILE = "amigos_valorant.json"
-LAST_MATCHES_FILE = "ultimas_partidas.json"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
 CANAL_ALERTAS_ID = 1496883989867139102 
 
-def load_json(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_json(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=4)
-
-last_matches_cache = load_json(LAST_MATCHES_FILE)
-friends = load_json(FRIENDS_FILE)
-
 @bot.event
 async def on_ready():
-    print(f"✅ Bot listo: {bot.user}")
+    # Creamos el pool de conexiones a la base de datos
+    bot.db = await asyncpg.create_pool(DATABASE_URL)
+    print(f"✅ Bot listo y conectado a PostgreSQL: {bot.user}")
+    
     await bot.tree.sync()
     if not vigilante_partidas.is_running():
         vigilante_partidas.start()
@@ -44,7 +33,6 @@ async def on_ready():
 @tasks.loop(minutes=5)
 async def vigilante_partidas():
     await bot.wait_until_ready() 
-    if not friends: return
     
     try:
         canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
@@ -52,63 +40,82 @@ async def vigilante_partidas():
         print(f"⚠️ ERROR: No se puede encontrar el canal de alertas.")
         return
 
-    for server_id, friend_list in friends.items():
-        for f in friend_list:
-            nombre, tag = f["nombre"], f["tag"]
-            s, err = await fetch_stats(nombre, tag)
+    # Obtenemos una lista única de jugadores para no comprobar al mismo 2 veces si está en varios servidores
+    jugadores = await bot.db.fetch("SELECT DISTINCT nombre, tag FROM jugadores")
+    if not jugadores: return
+
+    for j in jugadores:
+        nombre, tag = j["nombre"], j["tag"]
+        s, err = await fetch_stats(nombre, tag)
+        
+        # 4 segundos de pausa en background para no llamar NUNCA la atención de la API
+        await asyncio.sleep(4) 
+        
+        if err or not s or not s.get("last_match"):
+            continue
+
+        lm = s["last_match"]
+        match_id = lm.get("id")
+
+        # Comprobamos si este match_id exacto ya está en la base de datos
+        existe = await bot.db.fetchval(
+            "SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre = $2 AND jugador_tag = $3",
+            match_id, nombre, tag
+        )
+
+        if match_id and not existe:
+            k = lm.get("kills", 0)
+            d = lm.get("deaths", 1)
+            a = lm.get("assists", 0)
+            acs = lm.get("acs", 0)
+            won = lm.get("won", False)
+            agente = lm.get("agente", "Desconocido")
             
-            # 4 segundos de pausa en background para no llamar NUNCA la atención de la API
-            await asyncio.sleep(4) 
-            
-            if err or not s or not s.get("last_match"):
+            mapa = s.get('mapa', 'Desconocido')
+            modo_formateado = s.get('modo', 'Unrated').capitalize()
+
+            # Evitamos spam de la primera vez que se lee al jugador comprobando cuántas partidas tiene
+            total_partidas = await bot.db.fetchval(
+                "SELECT COUNT(*) FROM partidas WHERE jugador_nombre = $1 AND jugador_tag = $2",
+                nombre, tag
+            )
+            es_primera_vez = (total_partidas == 0)
+
+            # Insertamos la nueva partida
+            await bot.db.execute("""
+                INSERT INTO partidas (match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            """, match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente)
+
+            # Si es la primera partida que le registramos, cortamos aquí y no avisamos por Discord
+            if es_primera_vez:
                 continue
 
-            lm = s["last_match"]
-            match_id = lm.get("id")
-            key = f"{nombre}#{tag}"
+            resultado = "VICTORIA" if won else "DERROTA"
+            color_borde = 0x00FF00 if won else 0xFF0000
 
-            if match_id and last_matches_cache.get(key) != match_id:
-                es_primera_vez = (last_matches_cache.get(key) is None)
+            nombre_real = s.get('nombre') or nombre
+            tag_real = s.get('tag') or tag
+
+            title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+            desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+
+            if k >= 25 or acs >= 300:
+                title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
+                desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa} con {agente}."
+            elif d > (k + 8) or acs < 130:
+                title = f"🗑️ ¡Tenemos un infiltrado! 🗑️"
+                desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+
+            embed = discord.Embed(title=title, description=desc, color=color_borde)
+            embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
+            embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
+            embed.add_field(name="ACS", value=str(acs), inline=True)
+            
+            if s.get("card"): 
+                embed.set_thumbnail(url=s.get("card"))
                 
-                last_matches_cache[key] = match_id
-                save_json(LAST_MATCHES_FILE, last_matches_cache)
-
-                if es_primera_vez:
-                    continue
-
-                k = lm.get("kills", 0)
-                d = lm.get("deaths", 1)
-                a = lm.get("assists", 0)
-                acs = lm.get("acs", 0)
-                won = lm.get("won", False)
-                
-                resultado = "VICTORIA" if won else "DERROTA"
-                color_borde = 0x00FF00 if won else 0xFF0000
-
-                nombre_real = s.get('nombre') or nombre
-                tag_real = s.get('tag') or tag
-                mapa = s.get('mapa', 'Desconocido')
-                modo_formateado = s.get('modo', 'Unrated').capitalize()
-
-                title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
-                desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}**."
-
-                if k >= 25 or acs >= 300:
-                    title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
-                    desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa}."
-                elif d > (k + 8) or acs < 130:
-                    title = f"🗑️ ¡Tenemos un infiltrado! 🗑️"
-                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa}."
-
-                embed = discord.Embed(title=title, description=desc, color=color_borde)
-                embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
-                embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
-                embed.add_field(name="ACS", value=str(acs), inline=True)
-                
-                if s.get("card"): 
-                    embed.set_thumbnail(url=s.get("card"))
-                    
-                await canal.send(embed=embed)
+            await canal.send(embed=embed)
 
 async def fetch_stats(nombre, tag, region="eu"):
     def _request():
@@ -134,17 +141,41 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     s, err = await fetch_stats(nombre, tag, region)
 
     if err or not s:
-        # AHORA TE DARÁ EL ERROR REAL Y SABRÁS QUÉ PASA
         await interaction.followup.send(f"❌ Fallo al buscar a {nombre}#{tag}: {err}")
         return
 
     nombre_perfil = s.get('nombre') or nombre
     tag_perfil = s.get('tag') or tag
 
+    # Buscamos estadísticas en la BD
+    db_stats = await bot.db.fetchrow("""
+        SELECT 
+            SUM(kills) as tk, SUM(deaths) as td, SUM(assists) as ta,
+            AVG(acs) as acs_medio,
+            COUNT(CASE WHEN won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
+            COUNT(*) as total_matches
+        FROM partidas 
+        WHERE jugador_nombre = $1 AND jugador_tag = $2
+    """, nombre, tag)
+
+    # Buscamos los agentes más jugados en la BD
+    agent_rows = await bot.db.fetch("""
+        SELECT agente, COUNT(*) as count 
+        FROM partidas 
+        WHERE jugador_nombre = $1 AND jugador_tag = $2 
+        GROUP BY agente 
+        ORDER BY count DESC LIMIT 3
+    """, nombre, tag)
+    
+    top_agents_db = [r['agente'] for r in agent_rows]
+    tiene_datos_db = db_stats and db_stats['total_matches'] > 0
+
     color = 0xFF4655 if not s.get("smurf") else 0x9333EA
+    descripcion = f"Nivel {s.get('nivel')} | **Estadísticas Globales de la Temporada**" if tiene_datos_db else f"Nivel {s.get('nivel')} | **Últimas 10 partidas** (Faltan datos en BD)"
+
     embed = discord.Embed(
         title=f"📊 Estadísticas de {nombre_perfil}#{tag_perfil}",
-        description=f"Nivel {s.get('nivel')} | **Últimas 10 partidas**",
+        description=descripcion,
         color=color
     )
 
@@ -152,25 +183,36 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         embed.set_thumbnail(url=s.get("card"))
 
     embed.add_field(name="🏆 Rango", value=f"**{s.get('rank')}** ({s.get('rr')} RR)", inline=True)
-    embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
-    embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
 
-    embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
-    embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
-    embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
+    if tiene_datos_db:
+        kda_txt = f"{round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)}"
+        winrate_txt = f"{round(db_stats['winrate'], 1)}%"
+        acs_txt = f"{round(db_stats['acs_medio'], 1)}"
+        top_agents = top_agents_db
+        embed.add_field(name="📈 Winrate (Temp.)", value=f"**{winrate_txt}**", inline=True)
+        embed.add_field(name="📊 Partidas", value=f"**{db_stats['total_matches']}**", inline=True)
+        embed.add_field(name="⚔️ ACS (Combate)", value=acs_txt, inline=True)
+        embed.add_field(name="🎯 KDA", value=kda_txt, inline=True)
+        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}% (Reciente)", inline=True)
+    else:
+        # Fallback a los datos antiguos de la API si no tiene historial guardado
+        embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
+        embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
+        embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
+        embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
+        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
+        top_agents = s.get("top_agents", [])
 
-    top_agents = s.get("top_agents", [])
     if top_agents:
-        agentes_str = " | ".join(top_agents)
-        #embed.add_field(name="🕵️ Agentes Jugados", value=f"**{agentes_str}**", inline=False)
-        
         lineups_links = []
         for agent in top_agents:
+            if agent == "Desconocido": continue
             agente_formateado = urllib.parse.quote(agent)
             url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
             lineups_links.append(f"[{agent}]({url})")
             
-        embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
+        if lineups_links:
+            embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
     modo_str = s.get('modo', 'Desconocido')
@@ -179,65 +221,69 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="add", description="Guarda a un colega en la lista del servidor")
+@bot.tree.command(name="add", description="Guarda a un colega en la base de datos del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
     server_id = str(interaction.guild_id)
-    if server_id not in friends:
-        friends[server_id] = []
-    
-    if any(f["nombre"].lower() == nombre.lower() and f["tag"].lower() == tag.lower() for f in friends[server_id]):
+    try:
+        await bot.db.execute(
+            "INSERT INTO jugadores (server_id, nombre, tag) VALUES ($1, $2, $3)",
+            server_id, nombre, tag
+        )
+        await interaction.response.send_message(f"✅ Añadido a la lista de la temporada: **{nombre}#{tag}**")
+    except asyncpg.exceptions.UniqueViolationError:
         await interaction.response.send_message(f"⚠️ {nombre}#{tag} ya está en la lista.")
-        return
 
-    friends[server_id].append({"nombre": nombre, "tag": tag})
-    save_json(FRIENDS_FILE, friends)
-    await interaction.response.send_message(f"✅ Añadido a la lista: **{nombre}#{tag}**")
-
-@bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
+@bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor (Temporada Completa)")
 async def leaderboard(interaction: discord.Interaction):
     server_id = str(interaction.guild_id)
 
-    if server_id not in friends or not friends[server_id]:
+    # Verificamos si hay alguien de este server registrado
+    amigos = await bot.db.fetch("SELECT nombre, tag FROM jugadores WHERE server_id = $1", server_id)
+    
+    if not amigos:
         await interaction.response.send_message("❌ No hay nadie en la lista. Usad `/add` primero.")
         return
 
     await interaction.response.defer()
     
-    scores = []
-    jugadores_fantasma = []
-
-    for amigo in friends[server_id]:
-        s, err = await fetch_stats(amigo["nombre"], amigo["tag"])
-        
-        # EL SECRETO ESTÁ AQUÍ. Si pide muy rápido, Riot corta a partir del 3º.
-        await asyncio.sleep(3) 
-        
-        if not err and s:
-            scores.append(s)
-        else:
-            # Si a pesar de todo la API falla, ahora sabrás el motivo exacto entre paréntesis
-            jugadores_fantasma.append(f"{amigo['nombre']}#{amigo['tag']} ({err})")
+    # Consultamos la BD. ¡Esto es instantáneo y no requiere pausas `asyncio.sleep`!
+    scores = await bot.db.fetch("""
+        SELECT p.jugador_nombre as nombre, p.jugador_tag as tag, 
+               AVG(p.acs) as acs_medio, 
+               SUM(p.kills) as tk, SUM(p.deaths) as td, SUM(p.assists) as ta,
+               COUNT(*) as total_matches,
+               (
+                   SELECT agente 
+                   FROM partidas p2 
+                   WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag 
+                   GROUP BY agente ORDER BY COUNT(*) DESC LIMIT 1
+               ) as main_agent
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1
+        GROUP BY p.jugador_nombre, p.jugador_tag
+        ORDER BY acs_medio DESC
+    """, server_id)
 
     if not scores:
-        msg = "❌ No se pudieron cargar las stats de nadie."
+        msg = "❌ Todavía no hay partidas guardadas en la base de datos para generar el ranking."
         await interaction.followup.send(msg)
         return
 
-    scores.sort(key=lambda x: x.get("acs") if x.get("acs") is not None else 0, reverse=True)
-    embed = discord.Embed(title="🏆 Leaderboard de Colegas (Top ACS)", color=0xFFD700)
+    embed = discord.Embed(title="🏆 Leaderboard de Colegas (Top ACS Temporada)", color=0xFFD700)
     
     for i, p in enumerate(scores):
         medalla = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🔹"
         
-        nombre_lb = p.get('nombre') or "Jugador"
-        tag_lb = p.get('tag') or ""
-        main_agent = p.get('agent', 'Desconocido')
-        stats_txt = f"**ACS:** {p.get('acs')} | **KDA:** {p.get('kda')} | **Rank:** {p.get('rank')}"
-        embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
+        nombre_lb = p['nombre']
+        tag_lb = p['tag']
+        main_agent = p['main_agent'] or "Desconocido"
+        acs_val = round(p['acs_medio'], 1)
+        kda_val = round((p['tk'] + p['ta']) / max(p['td'], 1), 2)
+        partidas_jugadas = p['total_matches']
 
-    if jugadores_fantasma:
-        nombres_rotos = "\n".join(jugadores_fantasma)
-        embed.add_field(name="⚠️ Sin datos o Errores de API:", value=f"```\n{nombres_rotos}\n```", inline=False)
+        stats_txt = f"**ACS:** {acs_val} | **KDA:** {kda_val} | **Partidas Jugadas:** {partidas_jugadas}"
+        embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
 

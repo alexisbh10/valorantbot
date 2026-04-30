@@ -198,7 +198,8 @@ def obtener_stats(username, tag, region="eu"):
                     "deaths": s.get("deaths", 1),
                     "assists": s.get("assists", 0),
                     "acs": round(s.get("score", 0) / max(r, 1), 1),
-                    "won": won
+                    "won": won,
+                    "agente": p.get("character", "Desconocido") # ✅ Esta es la nueva línea
                 }
                 break
 
