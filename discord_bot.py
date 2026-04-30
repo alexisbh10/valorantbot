@@ -24,7 +24,39 @@ CANAL_ALERTAS_ID = 1496883989867139102
 async def on_ready():
     # Creamos el pool de conexiones a la base de datos
     bot.db = await asyncpg.create_pool(DATABASE_URL)
-    print(f"✅ Bot listo y conectado a PostgreSQL: {bot.user}")
+    print(f"✅ Bot conectado a PostgreSQL")
+    
+    # --- LA SOLUCIÓN: EL BOT CREA LAS TABLAS SI NO EXISTEN ---
+    print("🛠️ Verificando estructura de la base de datos...")
+    await bot.db.execute("""
+        CREATE TABLE IF NOT EXISTS jugadores (
+            id SERIAL PRIMARY KEY,
+            server_id VARCHAR(50) NOT NULL,
+            nombre VARCHAR(50) NOT NULL,
+            tag VARCHAR(10) NOT NULL,
+            UNIQUE (server_id, nombre, tag)
+        );
+
+        CREATE TABLE IF NOT EXISTS partidas (
+            match_id VARCHAR(100) NOT NULL,
+            jugador_nombre VARCHAR(50) NOT NULL,
+            jugador_tag VARCHAR(10) NOT NULL,
+            kills INTEGER,
+            deaths INTEGER,
+            assists INTEGER,
+            acs INTEGER,
+            won BOOLEAN,
+            mapa VARCHAR(50),
+            modo VARCHAR(50),
+            agente VARCHAR(50) DEFAULT 'Desconocido',
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (match_id, jugador_nombre, jugador_tag)
+        );
+    """)
+    print("✅ Base de datos lista y estructurada.")
+    # ---------------------------------------------------------
+
+    print(f"✅ Bot listo en Discord: {bot.user}")
     
     await bot.tree.sync()
     if not vigilante_partidas.is_running():
