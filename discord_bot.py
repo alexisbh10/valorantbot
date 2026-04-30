@@ -9,6 +9,15 @@ import urllib.parse
 import asyncpg
 from dotenv import load_dotenv
 
+from discord import app_commands
+
+MODOS_DISCORD = [
+    app_commands.Choice(name="Competitivo (Por defecto)", value="Competitive"),
+    app_commands.Choice(name="Todos los modos", value="%"),
+    app_commands.Choice(name="No Competitivo (Unrated)", value="Unrated"),
+    app_commands.Choice(name="Swiftplay", value="Swiftplay")
+]
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -167,8 +176,15 @@ async def fetch_stats(nombre, tag, region="eu"):
     return await asyncio.to_thread(_request)
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
-async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu"):
+@app_commands.choices(modo=MODOS_DISCORD)
+async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu", modo: app_commands.Choice[str] = None):
     await interaction.response.defer()
+
+    # Por defecto busca Competitivo, a menos que elijas "Todos los modos" u otro en el menú
+    modo_busqueda = modo.value if modo else "Competitive"
+    modo_display = modo.name if modo else "Competitivo"
+    if modo_busqueda == "%":
+        modo_display = "Todos los modos"
 
     s, err = await fetch_stats(nombre, tag, region)
 
@@ -179,7 +195,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     nombre_perfil = s.get('nombre') or nombre
     tag_perfil = s.get('tag') or tag
 
-    # Buscamos estadísticas en la BD
+    # Buscamos estadísticas en la BD. El ILIKE '%' permite que encuentre todos los modos.
     db_stats = await bot.db.fetchrow("""
         SELECT 
             SUM(kills) as tk, SUM(deaths) as td, SUM(assists) as ta,
@@ -187,23 +203,22 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
             COUNT(CASE WHEN won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
             COUNT(*) as total_matches
         FROM partidas 
-        WHERE jugador_nombre = $1 AND jugador_tag = $2
-    """, nombre, tag)
+        WHERE jugador_nombre = $1 AND jugador_tag = $2 AND modo ILIKE $3
+    """, nombre, tag, modo_busqueda)
 
-    # Buscamos los agentes más jugados en la BD
     agent_rows = await bot.db.fetch("""
         SELECT agente, COUNT(*) as count 
         FROM partidas 
-        WHERE jugador_nombre = $1 AND jugador_tag = $2 
+        WHERE jugador_nombre = $1 AND jugador_tag = $2 AND modo ILIKE $3
         GROUP BY agente 
         ORDER BY count DESC
-    """, nombre, tag)
+    """, nombre, tag, modo_busqueda)
     
     top_agents_db = [r['agente'] for r in agent_rows]
     tiene_datos_db = db_stats and db_stats['total_matches'] > 0
 
     color = 0xFF4655 if not s.get("smurf") else 0x9333EA
-    descripcion = f"Nivel {s.get('nivel')} | **Estadísticas Globales de la Temporada**" if tiene_datos_db else f"Nivel {s.get('nivel')} | **Últimas 10 partidas** (Faltan datos en BD)"
+    descripcion = f"Nivel {s.get('nivel')} | **Temporada ({modo_display})**" if tiene_datos_db else f"Nivel {s.get('nivel')} | **Sin partidas de {modo_display} guardadas**"
 
     embed = discord.Embed(
         title=f"📊 Estadísticas de {nombre_perfil}#{tag_perfil}",
@@ -220,41 +235,26 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         kda_txt = f"{round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)}"
         winrate_txt = f"{round(db_stats['winrate'], 1)}%"
         acs_txt = f"{round(db_stats['acs_medio'], 1)}"
-        top_agents = top_agents_db
-        embed.add_field(name="📈 Winrate (Temp.)", value=f"**{winrate_txt}**", inline=True)
+        embed.add_field(name="📈 Winrate", value=f"**{winrate_txt}**", inline=True)
         embed.add_field(name="📊 Partidas", value=f"**{db_stats['total_matches']}**", inline=True)
         embed.add_field(name="⚔️ ACS (Combate)", value=acs_txt, inline=True)
         embed.add_field(name="🎯 KDA", value=kda_txt, inline=True)
-        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}% (Reciente)", inline=True)
-    else:
-        # Fallback a los datos antiguos de la API si no tiene historial guardado
-        embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
-        embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
-        embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
-        embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
-        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
-        top_agents = s.get("top_agents", [])
-
-    if top_agents:
-        lineups_links = []
-        for agent in top_agents:
-            if agent == "Desconocido": continue
-            agente_formateado = urllib.parse.quote(agent)
-            url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
-            lineups_links.append(f"[{agent}]({url})")
-            
-        if lineups_links:
-            texto_enlaces = " | ".join(lineups_links)
-            # Cortamos el texto si se pasa del límite de Discord (1024) para que el bot no se rompa
-            if len(texto_enlaces) > 1000:
-                texto_enlaces = texto_enlaces[:990] + "... (Límite alcanzado)"
+        
+        if top_agents_db:
+            lineups_links = []
+            for agent in top_agents_db:
+                if agent == "Desconocido": continue
+                agente_formateado = urllib.parse.quote(agent)
+                url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
+                lineups_links.append(f"[{agent}]({url})")
                 
-            embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
-
-    estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
-    modo_str = s.get('modo', 'Desconocido')
-    mapa_str = s.get('mapa', 'Desconocido')
-    embed.set_footer(text=f"Última partida: {modo_str} en {mapa_str} • {estado}")
+            if lineups_links:
+                texto_enlaces = " | ".join(lineups_links)
+                if len(texto_enlaces) > 1000:
+                    texto_enlaces = texto_enlaces[:990] + "... (Límite)"
+                embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
+    else:
+        embed.add_field(name="ℹ️ Info", value=f"Aún no he registrado partidas de **{modo_display}**.", inline=False)
 
     await interaction.followup.send(embed=embed)
 
@@ -270,11 +270,16 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
     except asyncpg.exceptions.UniqueViolationError:
         await interaction.response.send_message(f"⚠️ {nombre}#{tag} ya está en la lista.")
 
-@bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor (Temporada Completa)")
-async def leaderboard(interaction: discord.Interaction):
+@bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
+@app_commands.choices(modo=MODOS_DISCORD)
+async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
     server_id = str(interaction.guild_id)
+    
+    modo_busqueda = modo.value if modo else "Competitive"
+    modo_display = modo.name if modo else "Competitivo"
+    if modo_busqueda == "%":
+        modo_display = "Todos los modos"
 
-    # Verificamos si hay alguien de este server registrado
     amigos = await bot.db.fetch("SELECT nombre, tag FROM jugadores WHERE server_id = $1", server_id)
     
     if not amigos:
@@ -283,7 +288,6 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.defer()
     
-    # Consultamos la BD. ¡Esto es instantáneo y no requiere pausas `asyncio.sleep`!
     scores = await bot.db.fetch("""
         SELECT p.jugador_nombre as nombre, p.jugador_tag as tag, 
                AVG(p.acs) as acs_medio, 
@@ -292,22 +296,22 @@ async def leaderboard(interaction: discord.Interaction):
                (
                    SELECT agente 
                    FROM partidas p2 
-                   WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag 
+                   WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag AND p2.modo ILIKE $2
                    GROUP BY agente ORDER BY COUNT(*) DESC LIMIT 1
                ) as main_agent
         FROM partidas p
         JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1
+        WHERE j.server_id = $1 AND p.modo ILIKE $2
         GROUP BY p.jugador_nombre, p.jugador_tag
         ORDER BY acs_medio DESC
-    """, server_id)
+    """, server_id, modo_busqueda)
 
     if not scores:
-        msg = "❌ Todavía no hay partidas guardadas en la base de datos para generar el ranking."
+        msg = f"❌ Todavía no hay partidas de **{modo_display}** guardadas."
         await interaction.followup.send(msg)
         return
 
-    embed = discord.Embed(title="🏆 Leaderboard de Colegas (Top ACS Temporada)", color=0xFFD700)
+    embed = discord.Embed(title=f"🏆 Leaderboard ({modo_display})", color=0xFFD700)
     
     for i, p in enumerate(scores):
         medalla = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🔹"
@@ -319,7 +323,7 @@ async def leaderboard(interaction: discord.Interaction):
         kda_val = round((p['tk'] + p['ta']) / max(p['td'], 1), 2)
         partidas_jugadas = p['total_matches']
 
-        stats_txt = f"**ACS:** {acs_val} | **KDA:** {kda_val} | **Partidas Jugadas:** {partidas_jugadas}"
+        stats_txt = f"**ACS:** {acs_val} | **KDA:** {kda_val} | **Partidas:** {partidas_jugadas}"
         embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
