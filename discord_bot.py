@@ -196,7 +196,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         FROM partidas 
         WHERE jugador_nombre = $1 AND jugador_tag = $2 
         GROUP BY agente 
-        ORDER BY count DESC LIMIT 3
+        ORDER BY count DESC
     """, nombre, tag)
     
     top_agents_db = [r['agente'] for r in agent_rows]
@@ -244,7 +244,12 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
             lineups_links.append(f"[{agent}]({url})")
             
         if lineups_links:
-            embed.add_field(name="📚 Aprende setups", value=" | ".join(lineups_links), inline=False)
+            texto_enlaces = " | ".join(lineups_links)
+            # Cortamos el texto si se pasa del límite de Discord (1024) para que el bot no se rompa
+            if len(texto_enlaces) > 1000:
+                texto_enlaces = texto_enlaces[:990] + "... (Límite alcanzado)"
+                
+            embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
 
     estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
     modo_str = s.get('modo', 'Desconocido')
