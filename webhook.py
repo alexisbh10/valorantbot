@@ -4,6 +4,7 @@ import time
 import urllib.parse
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
+import datetime
 
 app = FastAPI()
 
@@ -165,12 +166,22 @@ def obtener_stats(username, tag, region="eu"):
 
     match_status, match_json = safe_get(match_url, headers)
     
-    # 🛑 AQUÍ ESTABA EL FALLO: Si esto fallaba, antes devolvía ceros. Ahora bloquea y avisa del error.
     if match_status == 429: return None, "Rate Limit de Riot (Espera unos minutos)"
     if match_status == 408: return None, "Timeout (La API tardó demasiado en responder)"
     if match_status != 200: return None, f"Error cargando el historial de partidas (HTTP {match_status})"
 
-    matches = match_json.get("data", [])
+    matches_sucias = match_json.get("data", [])
+
+    # 🔥 FILTRO DE NUEVA TEMPORADA 🔥
+    # 30 de abril de 2026 a las 05:00 CEST (que son las 03:00 UTC)
+    inicio_temporada = datetime.datetime(2026, 4, 30, 3, 0, tzinfo=datetime.timezone.utc).timestamp()
+    
+    matches = []
+    for m in matches_sucias:
+        game_start = m.get("metadata", {}).get("game_start", 0)
+        # Solo dejamos pasar las partidas que ocurrieron después del parche
+        if game_start >= inicio_temporada:
+            matches.append(m)
 
     last_match = matches[0] if matches else {}
     mapa = last_match.get("metadata", {}).get("map", "Desconocido")
