@@ -180,7 +180,7 @@ async def fetch_stats(nombre, tag, region="eu"):
 async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu", modo: app_commands.Choice[str] = None):
     await interaction.response.defer()
 
-    # Por defecto busca Competitivo, a menos que elijas "Todos los modos" u otro en el menú
+    # Filtro de modo: por defecto Competitivo
     modo_busqueda = modo.value if modo else "Competitive"
     modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%":
@@ -195,7 +195,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     nombre_perfil = s.get('nombre') or nombre
     tag_perfil = s.get('tag') or tag
 
-    # Buscamos estadísticas en la BD. El ILIKE '%' permite que encuentre todos los modos.
+    # Consultamos a la Base de Datos
     db_stats = await bot.db.fetchrow("""
         SELECT 
             SUM(kills) as tk, SUM(deaths) as td, SUM(assists) as ta,
@@ -218,7 +218,9 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     tiene_datos_db = db_stats and db_stats['total_matches'] > 0
 
     color = 0xFF4655 if not s.get("smurf") else 0x9333EA
-    descripcion = f"Nivel {s.get('nivel')} | **Temporada ({modo_display})**" if tiene_datos_db else f"Nivel {s.get('nivel')} | **Sin partidas de {modo_display} guardadas**"
+    
+    # Si tiene datos mostramos "Temporada", si no, el clásico "Últimas 10"
+    descripcion = f"Nivel {s.get('nivel')} | **Temporada ({modo_display})**" if tiene_datos_db else f"Nivel {s.get('nivel')} | **Últimas 10 partidas** ({modo_display} sin datos BD)"
 
     embed = discord.Embed(
         title=f"📊 Estadísticas de {nombre_perfil}#{tag_perfil}",
@@ -229,32 +231,50 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     if s.get("card"):
         embed.set_thumbnail(url=s.get("card"))
 
+    # Rango SIEMPRE visible, como antes
     embed.add_field(name="🏆 Rango", value=f"**{s.get('rank')}** ({s.get('rr')} RR)", inline=True)
 
     if tiene_datos_db:
+        # Modo Nueva Temporada (BD)
         kda_txt = f"{round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)}"
         winrate_txt = f"{round(db_stats['winrate'], 1)}%"
         acs_txt = f"{round(db_stats['acs_medio'], 1)}"
-        embed.add_field(name="📈 Winrate", value=f"**{winrate_txt}**", inline=True)
+        
+        embed.add_field(name="📈 Winrate (Temp.)", value=f"**{winrate_txt}**", inline=True)
         embed.add_field(name="📊 Partidas", value=f"**{db_stats['total_matches']}**", inline=True)
         embed.add_field(name="⚔️ ACS (Combate)", value=acs_txt, inline=True)
         embed.add_field(name="🎯 KDA", value=kda_txt, inline=True)
-        
-        if top_agents_db:
-            lineups_links = []
-            for agent in top_agents_db:
-                if agent == "Desconocido": continue
-                agente_formateado = urllib.parse.quote(agent)
-                url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
-                lineups_links.append(f"[{agent}]({url})")
-                
-            if lineups_links:
-                texto_enlaces = " | ".join(lineups_links)
-                if len(texto_enlaces) > 1000:
-                    texto_enlaces = texto_enlaces[:990] + "... (Límite)"
-                embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
+        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}% (Reciente)", inline=True) 
+        top_agents = top_agents_db
     else:
-        embed.add_field(name="ℹ️ Info", value=f"Aún no he registrado partidas de **{modo_display}**.", inline=False)
+        # Modo Clásico (API) - ¡Vuelve la Tendencia y lo que tenías antes!
+        embed.add_field(name="📈 Winrate", value=f"**{s.get('winrate')}%**", inline=True)
+        embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
+        embed.add_field(name="⚔️ ACS (Combate)", value=str(s.get('acs')), inline=True)
+        embed.add_field(name="🎯 KDA", value=str(s.get('kda')), inline=True)
+        embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
+        top_agents = s.get("top_agents", [])
+
+    # Agentes y Setups (Protegido contra crash)
+    if top_agents:
+        lineups_links = []
+        for agent in top_agents:
+            if agent == "Desconocido": continue
+            agente_formateado = urllib.parse.quote(agent)
+            url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
+            lineups_links.append(f"[{agent}]({url})")
+            
+        if lineups_links:
+            texto_enlaces = " | ".join(lineups_links)
+            if len(texto_enlaces) > 1000:
+                texto_enlaces = texto_enlaces[:990] + "... (Límite de Discord)"
+            embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
+
+    # ¡RECUPERADO EL FOOTER ORIGINAL!
+    estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
+    modo_str = s.get('modo', 'Desconocido')
+    mapa_str = s.get('mapa', 'Desconocido')
+    embed.set_footer(text=f"Última partida: {modo_str} en {mapa_str} • {estado}")
 
     await interaction.followup.send(embed=embed)
 
