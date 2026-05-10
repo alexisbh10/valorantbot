@@ -7,15 +7,13 @@ from collections import Counter
 import datetime
 
 app = FastAPI()
-
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
-
 cache = {}
 
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        if time.time() - ts < 300: # 5 minutos de caché
+        if time.time() - ts < 300:
             return data
     return None
 
@@ -25,24 +23,19 @@ def set_cache(k, v):
 def safe_get(url, headers):
     try:
         r = requests.get(url, headers=headers, timeout=20)
-        if not r.content:
-            print(f"[safe_get] Respuesta vacía: {url}")
-            return r.status_code, {}
         try:
             data = r.json()
-        except Exception:
-            print(f"[safe_get] JSON inválido (HTTP {r.status_code}): {r.text[:300]}")
+        except:
             data = {}
         return r.status_code, data
     except requests.exceptions.Timeout:
-        print(f"[safe_get] Timeout: {url}")
         return 408, {}
     except Exception as e:
-        print(f"[safe_get] Error: {e}")
         return 500, {}
 
+
 def analyze_matches(matches, puuid, username, tag):
-    EMPTY = {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0,
+    EMPTY = {"kda": 0, "winrate": 0, "trend": "Estable", "hs": 0, "adr": 0, "acs": 0,
              "kast": 0, "damage_delta": 0, "agent": "Desconocido", "top_agents": []}
     if not matches:
         return EMPTY
@@ -57,7 +50,6 @@ def analyze_matches(matches, puuid, username, tag):
     total_matches = 0
 
     for m in matches[:10]:
-        # ── Encontrar al jugador en all_players ──────────────────────────────
         player = None
         for p in m.get("players", {}).get("all_players", []):
             if (puuid and p.get("puuid") == puuid) or (
@@ -69,23 +61,19 @@ def analyze_matches(matches, puuid, username, tag):
         if not player:
             continue
 
-        st   = player.get("stats", {})
-        k    = int(st.get("kills", 0) or 0)
-        d    = int(st.get("deaths", 0) or 0)
-        a    = int(st.get("assists", 0) or 0)
-        hs   = int(st.get("headshots", 0) or 0)
-        bs   = int(st.get("bodyshots", 0) or 0)
-        ls   = int(st.get("legshots", 0) or 0)
-        sc   = int(st.get("score", 0) or 0)
-        r    = int(m.get("metadata", {}).get("rounds_played", 1) or 1)
         my_puuid = player.get("puuid") or ""
+        st = player.get("stats", {})
+        k  = int(st.get("kills",     0) or 0)
+        d  = int(st.get("deaths",    0) or 0)
+        a  = int(st.get("assists",   0) or 0)
+        hs = int(st.get("headshots", 0) or 0)
+        bs = int(st.get("bodyshots", 0) or 0)
+        ls = int(st.get("legshots",  0) or 0)
+        sc = int(st.get("score",     0) or 0)
+        r  = int(m.get("metadata", {}).get("rounds_played", 1) or 1)
 
-        kills     += k
-        deaths    += d
-        assists   += a
-        headshots += hs
-        bodyshots += bs
-        legshots  += ls
+        kills     += k;  deaths    += d;  assists   += a
+        headshots += hs; bodyshots += bs; legshots  += ls
         score_total  += sc
         rounds_total += r
 
@@ -101,106 +89,87 @@ def analyze_matches(matches, puuid, username, tag):
         if team and isinstance(teams, dict) and teams.get(team, {}).get("has_won"):
             wins += 1
 
-        # ── Rondas: KAST + daño hecho/recibido ───────────────────────────────
         match_rounds = m.get("rounds", [])
 
         if not match_rounds:
-            # Sin datos de ronda: fallback con stats globales
+            # Fallback sin datos de ronda
+            dmg = int(player.get("damage_made") or 0)
+            damage_made_total += dmg
             kast_total += r
-            survived_est = max(0, r - d)
-            kast_ok += min(k + a + survived_est, r)
-            # Daño desde damage_made del jugador
-            dmg_made = int(player.get("damage_made") or st.get("damage_made") or 0)
-            damage_made_total += dmg_made
+            kast_ok    += min(k + a, r)
         else:
             kast_total += len(match_rounds)
             for rnd in match_rounds:
                 try:
-                    ps_list    = rnd.get("player_stats", [])
-                    kill_events = rnd.get("kill_events", [])  # Henrik alias
+                    ps_list     = rnd.get("player_stats", []) or []
+                    kill_events = rnd.get("kill_events",  []) or []
 
-                    # Encontrar el player_stats de esta ronda para nuestro jugador
                     my_ps = None
                     for ps in ps_list:
-                        if (my_puuid and ps.get("player_puuid") == my_puuid) or (
-                            str(ps.get("player_display_name") or "").split("#")[0].lower() == username.lower()
-                        ):
+                        ps_puuid = ps.get("player_puuid") or ""
+                        ps_name  = str(ps.get("player_display_name") or "").split("#")[0].lower()
+                        if (my_puuid and ps_puuid == my_puuid) or (not my_puuid and ps_name == username.lower()):
                             my_ps = ps
                             break
 
-                    # Sin datos de ronda para este jugador → no contabilizar
                     if my_ps is None:
                         kast_total -= 1
                         continue
 
-                    # ── Daño hecho (mis entradas damage[]) ───────────────────
-                    for dmg in (my_ps.get("damage") or []):
-                        damage_made_total += int(dmg.get("damage", 0) or 0)
+                    # Daño hecho
+                    for dmg_entry in (my_ps.get("damage") or []):
+                        damage_made_total += int(dmg_entry.get("damage", 0) or 0)
 
-                    # ── Daño recibido (busco en otros player_stats donde receiver == yo)
-                    for other_ps in ps_list:
-                        if other_ps is my_ps:
-                            continue
-                        for dmg in (other_ps.get("damage") or []):
-                            recv = dmg.get("receiver_puuid") or ""
-                            recv_name = str(dmg.get("receiver_display_name") or "").split("#")[0].lower()
-                            if (my_puuid and recv == my_puuid) or recv_name == username.lower():
-                                damage_received_total += int(dmg.get("damage", 0) or 0)
-
-                    # ── KAST ─────────────────────────────────────────────────
-                    # Kills de esta ronda (lista de objetos kill en my_ps)
-                    my_kills_rnd = my_ps.get("kills") or []
-                    rnd_k = len(my_kills_rnd) if isinstance(my_kills_rnd, list) else int(my_kills_rnd or 0)
-
-                    # Todos los kills de la ronda (para A, S, T)
-                    # Henrik v3: kill objects están en my_ps["kills"] de CADA jugador
-                    all_kills_rnd = []
+                    # Daño recibido
                     for ps in ps_list:
-                        raw = ps.get("kills") or []
-                        if isinstance(raw, list):
-                            all_kills_rnd.extend(raw)
+                        if ps is my_ps:
+                            continue
+                        for dmg_entry in (ps.get("damage") or []):
+                            recv_puuid = dmg_entry.get("receiver_puuid") or ""
+                            recv_name  = str(dmg_entry.get("receiver_display_name") or "").split("#")[0].lower()
+                            if (my_puuid and recv_puuid == my_puuid) or (not my_puuid and recv_name == username.lower()):
+                                damage_received_total += int(dmg_entry.get("damage", 0) or 0)
 
-                    # A: aparezco en assistants de cualquier kill
-                    rnd_a = sum(
-                        1 for ke in all_kills_rnd
-                        if any(
-                            (my_puuid and str(ast) == my_puuid) or
-                            str(ast).split("#")[0].lower() == username.lower()
-                            for ast in (ke.get("assistants") or [])
-                            if ast
-                        )
-                    )
+                    # KAST
+                    rnd_k = int(my_ps.get("kills", 0) or 0)
 
-                    # S: no aparezco como victim
+                    rnd_a = 0
+                    for ke in kill_events:
+                        for ast in (ke.get("assistants") or []):
+                            ast_puuid = ast.get("assistant_puuid", "") if isinstance(ast, dict) else str(ast)
+                            ast_name  = str(ast.get("assistant_display_name") or "").split("#")[0].lower() if isinstance(ast, dict) else ""
+                            if (my_puuid and ast_puuid == my_puuid) or ast_name == username.lower():
+                                rnd_a += 1
+                                break
+
                     survived = not any(
                         (my_puuid and ke.get("victim_puuid") == my_puuid) or
                         str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
-                        for ke in all_kills_rnd
+                        for ke in kill_events
                     )
 
-                    # T: morí pero alguien mató a mi asesino en ≤5s
                     traded = False
                     if not survived:
                         my_death = next(
-                            (ke for ke in all_kills_rnd if
+                            (ke for ke in kill_events if
                              (my_puuid and ke.get("victim_puuid") == my_puuid) or
                              str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
                             None
                         )
                         if my_death:
-                            killer = my_death.get("killer_puuid", "")
-                            t0     = int(my_death.get("kill_time_in_round") or 0)
+                            killer_puuid = my_death.get("killer_puuid", "")
+                            t0 = int(my_death.get("kill_time_in_round") or 0)
                             traded = any(
-                                ke.get("victim_puuid") == killer and
+                                ke.get("victim_puuid") == killer_puuid and
                                 abs(int(ke.get("kill_time_in_round") or 0) - t0) <= 5000
-                                for ke in all_kills_rnd
+                                for ke in kill_events
                             )
 
                     if rnd_k > 0 or rnd_a > 0 or survived or traded:
                         kast_ok += 1
 
                 except Exception as e:
-                    print(f"[KAST] Error ronda: {e}")
+                    print(f"[KAST/round] {e}")
                     continue
 
         total_matches += 1
@@ -210,14 +179,14 @@ def analyze_matches(matches, puuid, username, tag):
 
     total_shots = headshots + bodyshots + legshots
 
-    trend = "Estable ➖"
+    trend = "Estable"
     if len(kdas_history) >= 4:
         chron = list(reversed(kdas_history))
-        mid = len(chron) // 2
-        p1 = sum(chron[:mid]) / mid
-        p2 = sum(chron[mid:]) / (len(chron) - mid)
-        if p2 > p1 + 0.3:   trend = "Mejorando 📈"
-        elif p2 < p1 - 0.3: trend = "Empeorando 📉"
+        mid   = len(chron) // 2
+        p1    = sum(chron[:mid])  / mid
+        p2    = sum(chron[mid:])  / (len(chron) - mid)
+        if   p2 > p1 + 0.3: trend = "Mejorando"
+        elif p2 < p1 - 0.3: trend = "Empeorando"
 
     agent_counts = Counter(agents_played)
     top_agents   = [ag for ag, _ in agent_counts.most_common()]
@@ -236,6 +205,7 @@ def analyze_matches(matches, puuid, username, tag):
         "top_agents":   top_agents,
     }
 
+
 def obtener_stats(username, tag, region="eu"):
     key = f"{username.lower()}#{tag.lower()}"
     cached = get_cache(key)
@@ -243,126 +213,113 @@ def obtener_stats(username, tag, region="eu"):
 
     headers = {"Authorization": HENRIK_API_KEY} if HENRIK_API_KEY else {}
     safe_user = urllib.parse.quote(username)
-    safe_tag = urllib.parse.quote(tag)
+    safe_tag  = urllib.parse.quote(tag)
 
-    # 1. OBTIENE LA CUENTA
     acc_status, acc_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/account/{safe_user}/{safe_tag}", headers)
-    if acc_status == 429: return None, "Rate Limit (La API de Riot está saturada)"
-    if acc_status == 404: return None, "Jugador no encontrado (Riot ID cambiado o erróneo)"
-    if acc_status != 200: return None, f"Error cargando cuenta (HTTP {acc_status})"
+    if acc_status == 429: return None, "Rate Limit (La API de Riot esta saturada)"
+    if acc_status == 404: return None, "Jugador no encontrado (Riot ID cambiado o erroneo)"
+    if acc_status != 200: return None, f"Error cargando cuenta HTTP {acc_status}"
 
-    acc = acc_json.get("data", {})
-    puuid = acc.get("puuid")
-    real_name = acc.get("name") or username
-    real_tag = acc.get("tag") or tag
+    acc      = acc_json.get("data", {})
+    puuid    = acc.get("puuid")
+    realname = acc.get("name") or username
+    realtag  = acc.get("tag")  or tag
 
-    # 2. OBTIENE EL RANGO
     mmr_status, mmr_json = safe_get(f"https://api.henrikdev.xyz/valorant/v1/mmr/{region}/{safe_user}/{safe_tag}", headers)
     mmr_data = mmr_json.get("data", {}) if mmr_status == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
-    rr = mmr_data.get("ranking_in_tier", 0)
-    rank_icon = mmr_data.get("images", {}).get("small", "")
+    rr   = mmr_data.get("ranking_in_tier", 0)
 
-    # 3. OBTIENE EL HISTORIAL
+    rank_icon_url = ""
+    if mmr_status == 200:
+        images = mmr_data.get("images", {})
+        rank_icon_url = images.get("large") or images.get("small") or ""
+
     if puuid:
         match_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{region}/{puuid}?size=10"
     else:
         match_url = f"https://api.henrikdev.xyz/valorant/v3/matches/{region}/{safe_user}/{safe_tag}?size=10"
 
     match_status, match_json = safe_get(match_url, headers)
-    
-    if match_status == 429: return None, "Rate Limit de Riot (Espera unos minutos)"
-    if match_status == 408: return None, "Timeout (La API tardó demasiado en responder)"
-    if match_status != 200: return None, f"Error cargando el historial de partidas (HTTP {match_status})"
+    if match_status == 429: return None, "Rate Limit de Riot. Espera unos minutos"
+    if match_status == 408: return None, "Timeout. La API tardo demasiado en responder"
+    if match_status != 200: return None, f"Error cargando el historial de partidas HTTP {match_status}"
 
     matches_sucias = match_json.get("data", [])
 
-    # 🔥 FILTRO DE NUEVA TEMPORADA 🔥
-    # 30 de abril de 2026 a las 05:00 CEST (que son las 03:00 UTC)
     inicio_temporada = datetime.datetime(2026, 4, 30, 3, 0, tzinfo=datetime.timezone.utc).timestamp()
-    
-    matches = []
-    for m in matches_sucias:
-        game_start = m.get("metadata", {}).get("game_start", 0)
-        # Solo dejamos pasar las partidas que ocurrieron después del parche
-        if game_start >= inicio_temporada:
-            matches.append(m)
+    matches = [m for m in matches_sucias
+               if m.get("metadata", {}).get("game_start", 0) >= inicio_temporada]
 
-    last_match = matches[0] if matches else {}
-    mapa = last_match.get("metadata", {}).get("map", "Desconocido")
-    modo = last_match.get("metadata", {}).get("mode", "Desconocido")
-    match_id = last_match.get("metadata", {}).get("matchid", "")
-    
+    last_match = matches[0] if matches else None
+    mapa  = last_match.get("metadata", {}).get("map",  "Desconocido") if last_match else "Desconocido"
+    modo  = last_match.get("metadata", {}).get("mode", "Desconocido") if last_match else "Desconocido"
+    matchid = last_match.get("metadata", {}).get("matchid", "") if last_match else ""
+
     last_match_info = {}
     if last_match:
-        players = last_match.get("players", {}).get("all_players", [])
-        for p in players:
+        for p in last_match.get("players", {}).get("all_players", []):
             p_puuid = p.get("puuid")
-            p_name = p.get("name", "")
-            p_tag = p.get("tag", "")
-            
+            p_name  = p.get("name", "")
+            p_tag   = p.get("tag",  "")
             if (puuid and p_puuid == puuid) or (p_name.lower() == username.lower() and p_tag.lower() == tag.lower()):
-                s = p.get("stats", {})
-                r = last_match.get("metadata", {}).get("rounds_played", 1)
-                
+                s  = p.get("stats", {})
+                rp = last_match.get("metadata", {}).get("rounds_played", 1)
                 team = (p.get("team") or "").lower()
-                won = last_match.get("teams", {}).get(team, {}).get("has_won", False) if team else False
-                
+                won  = last_match.get("teams", {}).get(team, {}).get("has_won", False) if team else False
                 last_match_info = {
-                    "id": match_id,
-                    "kills": s.get("kills", 0),
-                    "deaths": s.get("deaths", 1),
-                    "assists": s.get("assists", 0),
-                    "acs": round(s.get("score", 0) / max(r, 1), 1),
-                    "won": won,
-                    "agente": p.get("character", "Desconocido") # ✅ Esta es la nueva línea
+                    "id":     matchid,
+                    "kills":  s.get("kills",   0),
+                    "deaths": s.get("deaths",  1),
+                    "assists":s.get("assists", 0),
+                    "acs":    round(s.get("score", 0) / max(rp, 1), 1),
+                    "won":    won,
+                    "agente": p.get("character", "Desconocido"),
                 }
                 break
 
-    analysis = analyze_matches(matches, puuid, username, tag)    
-
-    is_smurf = (analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]))
+    analysis = analyze_matches(matches, puuid, username, tag)
+    is_smurf = analysis["kda"] > 1.8 and analysis["winrate"] > 65 and any(
+        r in rank.lower() for r in ["iron", "bronze", "silver", "gold"]
+    )
 
     stats = {
-        "nombre": real_name,
-        "tag": real_tag,
-        "nivel": acc.get("account_level", 0),
-        "card": acc.get("card", {}).get("small", ""),
-        "rank": rank,
-        "rank_icon": rank_icon,
-        "rr": rr,
-        "mapa": mapa,
-        "modo": modo,
-        "kda": analysis["kda"],
-        "winrate": analysis["winrate"],
-        "hs": analysis["hs"],
-        "adr": analysis["adr"],
-        "acs": analysis["acs"],
-        "kast": analysis.get("kast", 0),
-        "damage_delta": analysis.get("damage_delta", 0),
-        "trend": analysis["trend"],
-        "smurf": is_smurf,
-        "last_match": last_match_info,
-        "agent": analysis.get("agent", "Desconocido"),
-        "top_agents": analysis.get("top_agents", [])
+        "nombre":       realname,
+        "tag":          realtag,
+        "nivel":        acc.get("account_level", 0),
+        "card":         acc.get("card", {}).get("small", ""),
+        "rank":         rank,
+        "rr":           rr,
+        "rank_icon":    rank_icon_url,
+        "mapa":         mapa,
+        "modo":         modo,
+        "kda":          analysis["kda"],
+        "winrate":      analysis["winrate"],
+        "hs":           analysis["hs"],
+        "adr":          analysis["adr"],
+        "acs":          analysis["acs"],
+        "kast":         analysis["kast"],
+        "trend":        analysis["trend"],
+        "damage_delta": analysis["damage_delta"],
+        "smurf":        is_smurf,
+        "last_match":   last_match_info,
+        "agent":        analysis.get("agent", "Desconocido"),
+        "top_agents":   analysis.get("top_agents", []),
     }
 
     set_cache(key, stats)
     return stats, None
 
+
 @app.post("/tracker")
 async def tracker(request: Request):
     body = await request.json()
     username = body.get("username")
-    tag = body.get("tag")
-    region = body.get("region", "eu")
-
+    tag      = body.get("tag")
+    region   = body.get("region", "eu")
     if not username or not tag:
         raise HTTPException(status_code=400, detail="Falta username o tag")
-
     stats, err = obtener_stats(username, tag, region)
-
     if err:
         return {"success": False, "error": err}
-
     return {"success": True, "stats": stats}
