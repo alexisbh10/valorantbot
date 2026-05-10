@@ -71,11 +71,43 @@ def analyze_matches(matches, puuid, username, tag):
         ls = int(st.get("legshots",  0) or 0)
         sc = int(st.get("score",     0) or 0)
         r  = int(m.get("metadata", {}).get("rounds_played", 1) or 1)
+        
+        mode = (m.get("metadata", {}).get("mode", "") or "").lower()
+        is_dm = mode in ["deathmatch", "team deathmatch", "escalation", "snowball fight"]
 
         kills     += k;  deaths    += d;  assists   += a
         headshots += hs; bodyshots += bs; legshots  += ls
-        score_total  += sc
-        rounds_total += r
+        
+        # Filtramos modos sin rondas para no destruir las medias de ACS y ADR
+        if not is_dm:
+            score_total  += sc
+            rounds_total += r
+            
+            # API v3 ya suele proporcionar el daño en la raíz del jugador
+            dmg_made = int(player.get("damage_made", 0) or 0)
+            dmg_recv = int(player.get("damage_received", 0) or 0)
+            
+            # Fallback seguro por si la API cambia y lo esconde dentro de los eventos de la ronda
+            match_rounds = m.get("rounds", [])
+            if dmg_made == 0 and dmg_recv == 0 and match_rounds:
+                for rnd in match_rounds:
+                    ps_list = rnd.get("player_stats", []) or []
+                    for ps in ps_list:
+                        ps_puuid = ps.get("player_puuid") or ""
+                        ps_name  = str(ps.get("player_display_name") or "").split("#")[0].lower()
+                        is_me = (my_puuid and ps_puuid == my_puuid) or (not my_puuid and ps_name == username.lower())
+                        
+                        for de in (ps.get("damage_events") or []):
+                            if is_me:
+                                dmg_made += int(de.get("damage", 0) or 0)
+                            
+                            recv_puuid = de.get("receiver_puuid") or ""
+                            recv_name  = str(de.get("receiver_display_name") or "").split("#")[0].lower()
+                            if (my_puuid and recv_puuid == my_puuid) or (not my_puuid and recv_name == username.lower()):
+                                dmg_recv += int(de.get("damage", 0) or 0)
+
+            damage_made_total += dmg_made
+            damage_received_total += dmg_recv
 
         if k + a > 0 or d > 0:
             kdas_history.append((k + a) / max(d, 1))
@@ -91,86 +123,68 @@ def analyze_matches(matches, puuid, username, tag):
 
         match_rounds = m.get("rounds", [])
 
-        if not match_rounds:
-            # Fallback sin datos de ronda
-            dmg = int(player.get("damage_made") or 0)
-            damage_made_total += dmg
-            kast_total += r
-            kast_ok    += min(k + a, r)
-        else:
-            kast_total += len(match_rounds)
-            for rnd in match_rounds:
-                try:
-                    ps_list     = rnd.get("player_stats", []) or []
-                    kill_events = rnd.get("kill_events",  []) or []
+        # Calculamos KAST solo si el modo tiene rondas competitivas/normales
+        if not is_dm:
+            if not match_rounds:
+                # Fallback extremo si no hay datos de rondas (ej: API incompleta)
+                kast_total += r
+                kast_ok    += min(k + a, r)
+            else:
+                for rnd in match_rounds:
+                    try:
+                        ps_list     = rnd.get("player_stats", []) or []
+                        kill_events = rnd.get("kill_events",  []) or []
 
-                    my_ps = None
-                    for ps in ps_list:
-                        ps_puuid = ps.get("player_puuid") or ""
-                        ps_name  = str(ps.get("player_display_name") or "").split("#")[0].lower()
-                        if (my_puuid and ps_puuid == my_puuid) or (not my_puuid and ps_name == username.lower()):
-                            my_ps = ps
-                            break
-
-                    if my_ps is None:
-                        kast_total -= 1
-                        continue
-
-                    # Daño hecho
-                    for dmg_entry in (my_ps.get("damage") or []):
-                        damage_made_total += int(dmg_entry.get("damage", 0) or 0)
-
-                    # Daño recibido
-                    for ps in ps_list:
-                        if ps is my_ps:
-                            continue
-                        for dmg_entry in (ps.get("damage") or []):
-                            recv_puuid = dmg_entry.get("receiver_puuid") or ""
-                            recv_name  = str(dmg_entry.get("receiver_display_name") or "").split("#")[0].lower()
-                            if (my_puuid and recv_puuid == my_puuid) or (not my_puuid and recv_name == username.lower()):
-                                damage_received_total += int(dmg_entry.get("damage", 0) or 0)
-
-                    # KAST
-                    rnd_k = int(my_ps.get("kills", 0) or 0)
-
-                    rnd_a = 0
-                    for ke in kill_events:
-                        for ast in (ke.get("assistants") or []):
-                            ast_puuid = ast.get("assistant_puuid", "") if isinstance(ast, dict) else str(ast)
-                            ast_name  = str(ast.get("assistant_display_name") or "").split("#")[0].lower() if isinstance(ast, dict) else ""
-                            if (my_puuid and ast_puuid == my_puuid) or ast_name == username.lower():
-                                rnd_a += 1
+                        # Comprobar si jugó esta ronda
+                        my_ps = None
+                        for ps in ps_list:
+                            ps_puuid = ps.get("player_puuid") or ""
+                            ps_name  = str(ps.get("player_display_name") or "").split("#")[0].lower()
+                            if (my_puuid and ps_puuid == my_puuid) or (not my_puuid and ps_name == username.lower()):
+                                my_ps = ps
                                 break
 
-                    survived = not any(
-                        (my_puuid and ke.get("victim_puuid") == my_puuid) or
-                        str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
-                        for ke in kill_events
-                    )
+                        if my_ps is None:
+                            continue
+                        
+                        kast_total += 1
+                        
+                        # (K)ills & (A)ssists directos de los eventos (100% preciso)
+                        rnd_k = sum(1 for ke in kill_events if (my_puuid and ke.get("killer_puuid") == my_puuid) or str(ke.get("killer_display_name") or "").split("#")[0].lower() == username.lower())
+                        rnd_a = sum(1 for ke in kill_events for ast in (ke.get("assistants") or []) if (my_puuid and (ast.get("assistant_puuid", "") if isinstance(ast, dict) else str(ast)) == my_puuid) or (str(ast.get("assistant_display_name") or "").split("#")[0].lower() if isinstance(ast, dict) else "") == username.lower())
 
-                    traded = False
-                    if not survived:
-                        my_death = next(
-                            (ke for ke in kill_events if
-                             (my_puuid and ke.get("victim_puuid") == my_puuid) or
-                             str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
-                            None
+                        # (S)urvived
+                        survived = not any(
+                            (my_puuid and ke.get("victim_puuid") == my_puuid) or
+                            str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
+                            for ke in kill_events
                         )
-                        if my_death:
-                            killer_puuid = my_death.get("killer_puuid", "")
-                            t0 = int(my_death.get("kill_time_in_round") or 0)
-                            traded = any(
-                                ke.get("victim_puuid") == killer_puuid and
-                                abs(int(ke.get("kill_time_in_round") or 0) - t0) <= 5000
-                                for ke in kill_events
+
+                        # (T)raded
+                        traded = False
+                        if not survived:
+                            my_death = next(
+                                (ke for ke in kill_events if
+                                 (my_puuid and ke.get("victim_puuid") == my_puuid) or
+                                 str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
+                                None
                             )
+                            if my_death:
+                                killer_puuid = my_death.get("killer_puuid", "")
+                                t0 = int(my_death.get("kill_time_in_round") or 0)
+                                if killer_puuid: # El killer no es el entorno (ej: spike)
+                                    traded = any(
+                                        ke.get("victim_puuid") == killer_puuid and
+                                        0 <= (int(ke.get("kill_time_in_round") or 0) - t0) <= 5000
+                                        for ke in kill_events
+                                    )
 
-                    if rnd_k > 0 or rnd_a > 0 or survived or traded:
-                        kast_ok += 1
+                        if rnd_k > 0 or rnd_a > 0 or survived or traded:
+                            kast_ok += 1
 
-                except Exception as e:
-                    print(f"[KAST/round] {e}")
-                    continue
+                    except Exception as e:
+                        print(f"[KAST/round] {e}")
+                        continue
 
         total_matches += 1
 
