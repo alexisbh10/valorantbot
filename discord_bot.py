@@ -143,18 +143,55 @@ async def vigilante_partidas():
             title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
             desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
 
-            if k >= 25 or acs >= 300:
-                title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
-                desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa} con {agente}."
-            elif d > (k + 8) or acs < 130:
-                title = f"🗑️ ¡Tenemos un infiltrado! 🗑️"
-                desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+            if modo_formateado == "Competitive" or modo_formateado == "Unrated":
+                if k >= 25 or acs >= 300:
+                    title = f"🚨 ¡ALERTA DE CARREADA! 🚨"
+                    desc = f"**{nombre_real}#{tag_real}** acaba de destrozar el lobby jugando {modo_formateado} en {mapa} con {agente}."
+                elif d > (k + 8) or acs < 130:
+                    title = f"🗑️ ¡Tenemos un infiltrado! 🗑️"
+                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+                else:
+                    title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                    desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+                
+            elif modo_formateado == "Skirmish 1v1" or modo_formateado == "Skirmish 2v2":
+                if k >= 10 and acs >= 150:
+                    title = f"¡ALERTA DE DESTROZO EN {modo_formateado.upper()}! 🚨"
+                    desc = f"**{nombre_real}#{tag_real}** acaba de arrasar en {modo_formateado} en {mapa} con {agente}."
+                elif d > (k + 5) or acs < 100:
+                    title = f"🗑️ Sospecha de bot en {modo_formateado.upper()} 🗑️"
+                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+                else:
+                    title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                    desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+
+            elif modo_formateado == "Swiftplay":
+                if k >= 10 and acs >= 250:
+                    title = f"¡ALERTA DE DESTROZO EN {modo_formateado.upper()}! 🚨"
+                    desc = f"**{nombre_real}#{tag_real}** acaba de arrasar en {modo_formateado} en {mapa} con {agente}."
+                elif d > (k + 5) or acs < 120:
+                    title = f"🗑️ Sospecha de bot en {modo_formateado.upper()} 🗑️"
+                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+                else:
+                    title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                    desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+
+            elif modo_formateado == "Deathmatch" or modo_formateado == "Team deathmatch":
+                if k >= 30:
+                    title = f"¡ALERTA DE DESTROZO EN {modo_formateado.upper()}! 🚨"
+                    desc = f"**{nombre_real}#{tag_real}** acaba de arrasar en {modo_formateado} en {mapa} con {agente}."
+                elif d > (k + 10):
+                    title = f"🗑️ Sospecha de bot en {modo_formateado.upper()} 🗑️"
+                    desc = f"El monitor de **{nombre_real}#{tag_real}** estaba apagado jugando {modo_formateado} en {mapa} con {agente}."
+                else:
+                    title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                    desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
 
             embed = discord.Embed(title=title, description=desc, color=color_borde)
             embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
             embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
             embed.add_field(name="ACS", value=str(acs), inline=True)
-            
+        
             if s.get("card"): 
                 embed.set_thumbnail(url=s.get("card"))
                 
