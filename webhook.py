@@ -241,6 +241,7 @@ def obtener_stats(username, tag, region="eu"):
     mmr_data = mmr_json.get("data", {}) if mmr_status == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
+    rank_icon = mmr_data.get("images", {}).get("large") or mmr_data.get("images", {}).get("small") or mmr_data.get("images", {}).get("triangle_down") or ""
 
     if puuid:
         match_url = f"https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/{region}/{puuid}?size=10"
@@ -303,6 +304,7 @@ def obtener_stats(username, tag, region="eu"):
         "card": acc.get("card", {}).get("small", ""),
         "rank": rank,
         "rr": rr,
+        "rank_icon": rank_icon,
         "mapa": mapa,
         "modo": modo,
         "kda": analysis["kda"],

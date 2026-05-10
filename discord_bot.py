@@ -150,7 +150,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 138, 26, PANEL_2)
 
     try:
-        icon_url = s.get("rank_icon", "")
+        icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
             ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((84, 84))
@@ -166,12 +166,17 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         card_url = s.get("card", "")
         if card_url:
             card_raw = Image.open(io.BytesIO(requests.get(card_url, timeout=6).content)).convert("RGBA")
-            cw, ch = 180, 104
-            card = card_raw.resize((cw, ch))
+            cw, ch = 130, 130
+            card = card_raw.copy()
+            card.thumbnail((cw, ch), Image.LANCZOS)
+            layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            px = (cw - card.width) // 2
+            py = (ch - card.height) // 2
+            layer.paste(card, (px, py), card if card.mode == "RGBA" else None)
             mask = Image.new("L", (cw, ch), 0)
-            ImageDraw.Draw(mask).rounded_rectangle([0, 0, cw, ch], radius=18, fill=168)
-            card.putalpha(mask)
-            img.paste(card, (W - PAD - cw - 18, PAD + 18), card)
+            ImageDraw.Draw(mask).rounded_rectangle([0, 0, cw, ch], radius=18, fill=220)
+            layer.putalpha(mask)
+            img.paste(layer, (W - PAD - cw - 22, PAD + 18), layer)
     except Exception:
         pass
 
@@ -203,15 +208,14 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     rounded_box(PAD, mid_y, PAD + left_w, H - PAD, 22, PANEL_2, outline=LINE)
     rounded_box(PAD + left_w + 18, mid_y, W - PAD, H - PAD, 22, PANEL_2, outline=LINE)
 
-    text(PAD + 22, mid_y + 20, "RESUMEN DE BASE DE DATOS", _FB(20), TEXT)
-    text(PAD + 22, mid_y + 50, "Métricas recalculadas desde tu base con lógica estilo Tracker.", _FR(15), MUTED)
+    text(PAD + 22, mid_y + 20, "Resumen de partidas", _FB(20), TEXT)
 
     delta_color = POS if (_safe_float(dda_show) >= 0) else NEG
     db_rows = [
         ("DDA / Ronda", fmt_num(dda_show), delta_color),
         ("Winrate", fmt_num(db_stats.get("winrate") if tiene_datos_db else None, suffix="%"), TEXT),
         ("Partidas", str(db_stats.get("total_matches")) if (tiene_datos_db and db_stats and db_stats.get("total_matches") is not None) else "—", TEXT),
-        ("Tendencia", str(s.get("trend", "—")), TEXT),
+        ("Tendencia", str(s.get("trend")), TEXT),
     ]
     row_y = mid_y + 92
     for idx, (label, value, color) in enumerate(db_rows):
@@ -221,7 +225,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         draw.line([(PAD + 22, y + 34), (PAD + left_w - 20, y + 34)], fill=LINE, width=1)
 
     rx = PAD + left_w + 18
-    text(rx + 22, mid_y + 20, "ÚLTIMA PARTIDA", _FB(20), TEXT)
+    text(rx + 22, mid_y + 20, "Última partida", _FB(20), TEXT)
     lm = s.get("last_match", {}) or {}
     won = lm.get("won")
     result_txt = "Victoria" if won else "Derrota"
@@ -231,7 +235,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     text(rx + 22, mid_y + 138, f"ADR {fmt_num(lm.get('adr'))} · KAST {fmt_num(lm.get('kast'), suffix='%')} · DDA {fmt_num(lm.get('dda'))}", _FR(16), MUTED)
     text(rx + 22, mid_y + 172, f"Mapa: {s.get('mapa', '?')} · Modo: {s.get('modo', '?')}", _FR(16), MUTED)
 
-    text(rx + 22, mid_y + 220, "AGENTES MÁS JUGADOS", _FR(15), MUTED)
+    text(rx + 22, mid_y + 220, "Agentes más jugados", _FR(15), MUTED)
     agents = [a for a in top_agents_db if a != "Desconocido"][:5]
     badge_y = mid_y + 252
     cur_x = rx + 22
@@ -241,8 +245,6 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         rounded_box(cur_x, badge_y, cur_x + bw, badge_y + 34, 17, (28, 33, 44), outline=(255, 255, 255, 18))
         text(cur_x + 15, badge_y + 8, agent, _FR(15), TEXT)
         cur_x += bw + 10
-
-    text(PAD + 4, H - PAD + 8, "KAST y DDA se recalculan con tu BD; si faltan campos, usa fallback del webhook.", _FR(13), MUTED)
 
     mask_img = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask_img).rounded_rectangle([0, 0, W, H], radius=28, fill=255)
