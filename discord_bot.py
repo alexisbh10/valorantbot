@@ -106,20 +106,22 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
     W, H = 1100, 620
     PAD = 34
-    BG = (10, 11, 16)
-    PANEL = (18, 20, 28)
-    PANEL_2 = (24, 26, 36)
-    TEXT = (245, 247, 250)
-    MUTED = (154, 162, 178)
-    LINE = (44, 48, 62)
-    POS = (85, 214, 143)
-    NEG = (232, 92, 92)
+    BG = (9, 11, 17)
+    PANEL = (15, 18, 28)
+    PANEL_SOFT = (21, 25, 38)
+    PANEL_ELEV = (27, 32, 47)
+    TEXT = (245, 247, 251)
+    MUTED = (150, 159, 179)
+    FAINT = (104, 112, 132)
+    LINE = (42, 48, 67)
+    POS = (79, 209, 138)
+    NEG = (236, 96, 96)
 
     def rounded_box(x1, y1, x2, y2, radius, fill, outline=None, width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
 
-    def text(x, y, value, font, fill):
-        draw.text((x, y), str(value), font=font, fill=fill)
+    def text(x, y, value, font, fill, anchor=None):
+        draw.text((x, y), str(value), font=font, fill=fill, anchor=anchor)
 
     def fmt_num(v, digits=1, suffix=""):
         if v is None:
@@ -134,49 +136,58 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
 
     for i in range(H):
         t = i / H
-        c = tuple(int(BG[j] * (1 - t) + (16, 18, 24)[j] * t) for j in range(3))
+        c = tuple(int(BG[j] * (1 - t) + (14, 18, 28)[j] * t) for j in range(3))
         draw.line([(0, i), (W, i)], fill=c, width=1)
 
-    for r in range(280, 0, -8):
-        a = int(22 * (1 - r / 280))
+    for r in range(300, 0, -10):
+        a = int(24 * (1 - r / 300))
         c = tuple(min(255, int(acc1[j] * a / 255 + BG[j])) for j in range(3))
-        draw.ellipse((-40, -30, r + 30, r + 40), fill=c)
-    for r in range(220, 0, -8):
-        a = int(14 * (1 - r / 220))
+        draw.ellipse((-70, -50, r + 10, r + 30), fill=c)
+    for r in range(250, 0, -10):
+        a = int(16 * (1 - r / 250))
         c = tuple(min(255, int(acc2[j] * a / 255 + BG[j])) for j in range(3))
-        draw.ellipse((W - r - 40, H - r - 120, W + 60, H + 20), fill=c)
+        draw.ellipse((W - r - 40, H - r - 130, W + 80, H + 10), fill=c)
 
-    rounded_box(PAD, PAD, W - PAD, H - PAD, 26, PANEL, outline=(255, 255, 255, 18))
-    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 138, 26, PANEL_2)
+    rounded_box(PAD, PAD, W - PAD, H - PAD, 28, PANEL, outline=(255, 255, 255, 16))
+    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 146, 28, PANEL_SOFT)
 
     try:
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
-            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((84, 84))
-            img.paste(ri, (PAD + 22, PAD + 24), ri)
+            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA")
+            ri.thumbnail((88, 88), Image.LANCZOS)
+            icon_layer = Image.new("RGBA", (92, 92), (0, 0, 0, 0))
+            ix = (92 - ri.width) // 2
+            iy = (92 - ri.height) // 2
+            icon_layer.paste(ri, (ix, iy), ri)
+            rounded_box(PAD + 18, PAD + 20, PAD + 110, PAD + 112, 24, PANEL_ELEV, outline=(255, 255, 255, 20))
+            img.paste(icon_layer, (PAD + 18, PAD + 20), icon_layer)
     except Exception:
         pass
 
-    header_x = PAD + 126
-    text(header_x, PAD + 24, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(46), TEXT)
-    text(header_x, PAD + 78, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')} · {modo_display}", _FR(20), MUTED)
+    header_x = PAD + 132
+    text(header_x, PAD + 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(44), TEXT)
+    text(header_x, PAD + 80, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')} · {modo_display}", _FR(20), MUTED)
 
     try:
         card_url = s.get("card", "")
         if card_url:
             card_raw = Image.open(io.BytesIO(requests.get(card_url, timeout=6).content)).convert("RGBA")
-            cw, ch = 130, 130
+            cw, ch = 132, 132
             card = card_raw.copy()
             card.thumbnail((cw, ch), Image.LANCZOS)
             layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
             px = (cw - card.width) // 2
             py = (ch - card.height) // 2
-            layer.paste(card, (px, py), card if card.mode == "RGBA" else None)
+            layer.paste(card, (px, py), card)
             mask = Image.new("L", (cw, ch), 0)
-            ImageDraw.Draw(mask).rounded_rectangle([0, 0, cw, ch], radius=18, fill=220)
+            ImageDraw.Draw(mask).rounded_rectangle([0, 0, cw, ch], radius=24, fill=255)
+            border = Image.new("RGBA", (cw + 8, ch + 8), (0, 0, 0, 0))
+            ImageDraw.Draw(border).rounded_rectangle([0, 0, cw + 7, ch + 7], radius=26, fill=PANEL_ELEV, outline=(255, 255, 255, 20), width=1)
             layer.putalpha(mask)
-            img.paste(layer, (W - PAD - cw - 22, PAD + 18), layer)
+            img.paste(border, (W - PAD - cw - 28, PAD + 14), border)
+            img.paste(layer, (W - PAD - cw - 24, PAD + 18), layer)
     except Exception:
         pass
 
@@ -185,69 +196,74 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     dda_show = db_stats.get("dda_medio") if (tiene_datos_db and db_stats) else (s.get("dda") or s.get("damage_delta"))
 
     cards = [
-        ("KDA", str(s.get("kda", "0")), acc1),
-        ("ACS", str(s.get("acs", "0")), acc1),
-        ("ADR", fmt_num(adr_show), acc1),
-        ("HS%", f"{s.get('hs', 0)}%", acc1),
-        ("KAST", fmt_num(kast_show, suffix="%"), acc1),
+        ("KDA", str(s.get("kda", "0"))),
+        ("ACS", str(s.get("acs", "0"))),
+        ("ADR", fmt_num(adr_show)),
+        ("HS%", f"{s.get('hs', 0)}%"),
+        ("KAST", fmt_num(kast_show, suffix="%")),
     ]
 
-    top_y = 164
-    gap = 16
+    top_y = 168
+    gap = 14
     card_w = int((W - PAD * 2 - gap * 4) / 5)
-    for i, (label, value, accent) in enumerate(cards):
+    for i, (label, value) in enumerate(cards):
         x1 = PAD + i * (card_w + gap)
         x2 = x1 + card_w
-        rounded_box(x1, top_y, x2, top_y + 118, 20, PANEL_2, outline=LINE)
-        draw.rounded_rectangle([x1, top_y, x1 + 6, top_y + 118], radius=20, fill=accent)
-        text(x1 + 22, top_y + 24, label, _FR(16), MUTED)
-        text(x1 + 22, top_y + 56, value, _FB(34), TEXT)
+        rounded_box(x1, top_y, x2, top_y + 112, 22, PANEL_SOFT, outline=LINE)
+        rounded_box(x1 + 12, top_y + 12, x1 + 58, top_y + 38, 13, PANEL_ELEV)
+        text(x1 + 35, top_y + 26, label, _FM(14), MUTED, anchor="mm")
+        text(x1 + 20, top_y + 56, value, _FB(32), TEXT)
+        draw.line([(x1 + 18, top_y + 92), (x2 - 18, top_y + 92)], fill=(255, 255, 255, 10), width=1)
+        text(x1 + 20, top_y + 97, "Actual", _FR(13), FAINT)
 
-    mid_y = 306
+    mid_y = 300
     left_w = 520
-    rounded_box(PAD, mid_y, PAD + left_w, H - PAD, 22, PANEL_2, outline=LINE)
-    rounded_box(PAD + left_w + 18, mid_y, W - PAD, H - PAD, 22, PANEL_2, outline=LINE)
+    rounded_box(PAD, mid_y, PAD + left_w, H - PAD, 24, PANEL_SOFT, outline=LINE)
+    rounded_box(PAD + left_w + 18, mid_y, W - PAD, H - PAD, 24, PANEL_SOFT, outline=LINE)
 
-    text(PAD + 22, mid_y + 20, "Resumen de partidas", _FB(20), TEXT)
+    text(PAD + 24, mid_y + 24, "Resumen de partidas", _FB(20), TEXT)
+    text(PAD + 24, mid_y + 52, "Tu base manda cuando ya hay histórico guardado.", _FR(15), FAINT)
 
     delta_color = POS if (_safe_float(dda_show) >= 0) else NEG
     db_rows = [
         ("DDA / Ronda", fmt_num(dda_show), delta_color),
         ("Winrate", fmt_num(db_stats.get("winrate") if tiene_datos_db else None, suffix="%"), TEXT),
         ("Partidas", str(db_stats.get("total_matches")) if (tiene_datos_db and db_stats and db_stats.get("total_matches") is not None) else "—", TEXT),
-        ("Tendencia", str(s.get("trend")), TEXT),
+        ("Tendencia", str(s.get("trend", "—")), TEXT),
     ]
-    row_y = mid_y + 92
+    row_y = mid_y + 98
     for idx, (label, value, color) in enumerate(db_rows):
-        y = row_y + idx * 48
-        text(PAD + 24, y, label, _FR(15), MUTED)
-        text(PAD + 240, y - 4, value, _FB(24), color)
-        draw.line([(PAD + 22, y + 34), (PAD + left_w - 20, y + 34)], fill=LINE, width=1)
+        y1 = row_y + idx * 50
+        rounded_box(PAD + 20, y1 - 10, PAD + left_w - 20, y1 + 28, 14, PANEL_ELEV if idx == 0 else PANEL, outline=(255,255,255,10))
+        text(PAD + 38, y1, label, _FM(15), MUTED)
+        text(PAD + left_w - 34, y1 - 1, value, _FB(23), color, anchor="ra")
 
     rx = PAD + left_w + 18
-    text(rx + 22, mid_y + 20, "Última partida", _FB(20), TEXT)
+    text(rx + 24, mid_y + 24, "Última partida", _FB(20), TEXT)
+    text(rx + 24, mid_y + 52, "Lectura rápida del último match detectado.", _FR(15), FAINT)
     lm = s.get("last_match", {}) or {}
     won = lm.get("won")
     result_txt = "Victoria" if won else "Derrota"
     result_col = POS if won else NEG
-    text(rx + 22, mid_y + 58, result_txt, _FB(30), result_col)
-    text(rx + 22, mid_y + 102, f"{lm.get('agente', '?')} · {lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)} · ACS {lm.get('acs', 0)}", _FR(18), TEXT)
-    text(rx + 22, mid_y + 138, f"ADR {fmt_num(lm.get('adr'))} · KAST {fmt_num(lm.get('kast'), suffix='%')} · DDA {fmt_num(lm.get('dda'))}", _FR(16), MUTED)
-    text(rx + 22, mid_y + 172, f"Mapa: {s.get('mapa', '?')} · Modo: {s.get('modo', '?')}", _FR(16), MUTED)
+    rounded_box(rx + 24, mid_y + 88, rx + 168, mid_y + 126, 16, PANEL_ELEV)
+    text(rx + 96, mid_y + 107, result_txt, _FM(20), result_col, anchor="mm")
+    text(rx + 24, mid_y + 154, f"{lm.get('agente', '?')} · {lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)} · ACS {lm.get('acs', 0)}", _FM(18), TEXT)
+    text(rx + 24, mid_y + 188, f"ADR {fmt_num(lm.get('adr'))} · KAST {fmt_num(lm.get('kast'), suffix='%')} · DDA {fmt_num(lm.get('dda'))}", _FR(16), MUTED)
+    text(rx + 24, mid_y + 220, f"Mapa: {s.get('mapa', '?')} · Modo: {s.get('modo', '?')}", _FR(16), MUTED)
 
-    text(rx + 22, mid_y + 220, "Agentes más jugados", _FR(15), MUTED)
+    text(rx + 24, mid_y + 266, "Agentes más jugados", _FM(15), FAINT)
     agents = [a for a in top_agents_db if a != "Desconocido"][:5]
-    badge_y = mid_y + 252
-    cur_x = rx + 22
+    badge_y = mid_y + 294
+    cur_x = rx + 24
     for agent in agents:
-        tw = draw.textbbox((0, 0), agent, font=_FR(15))[2]
+        tw = draw.textbbox((0, 0), agent, font=_FM(15))[2]
         bw = tw + 30
-        rounded_box(cur_x, badge_y, cur_x + bw, badge_y + 34, 17, (28, 33, 44), outline=(255, 255, 255, 18))
-        text(cur_x + 15, badge_y + 8, agent, _FR(15), TEXT)
+        rounded_box(cur_x, badge_y, cur_x + bw, badge_y + 34, 17, PANEL_ELEV, outline=(255, 255, 255, 16))
+        text(cur_x + 15, badge_y + 8, agent, _FM(15), TEXT)
         cur_x += bw + 10
 
     mask_img = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask_img).rounded_rectangle([0, 0, W, H], radius=28, fill=255)
+    ImageDraw.Draw(mask_img).rounded_rectangle([0, 0, W, H], radius=30, fill=255)
     img.putalpha(mask_img)
 
     buf = io.BytesIO()
@@ -563,7 +579,7 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
         if extras:
             stats_txt += "\n" + " | ".join(extras)
         main_agent = p["main_agent"] or "Desconocido"
-        embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']}", value=stats_txt, inline=False)
+        embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']} ({main_agent})", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
 
