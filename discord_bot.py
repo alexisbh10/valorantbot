@@ -563,7 +563,7 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
         if extras:
             stats_txt += "\n" + " | ".join(extras)
         main_agent = p["main_agent"] or "Desconocido"
-        embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']} ({main_agent})", value=stats_txt, inline=False)
+        embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']}", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
 
