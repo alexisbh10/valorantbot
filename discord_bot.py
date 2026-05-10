@@ -269,7 +269,12 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         embed.set_thumbnail(url=s.get("card"))
 
     # DATOS GLOBALES SIEMPRE VISIBLES
-    embed.add_field(name="🏆 Rango", value=f"**{s.get('rank')}** ({s.get('rr')} RR)", inline=True)
+    rank_str  = s.get('rank', 'Unranked')
+    rank_icon = s.get('rank_icon', '')
+    rank_display = f"**{rank_str}** ({s.get('rr')} RR)"
+    embed.add_field(name="🏆 Rango", value=rank_display, inline=True)
+    if rank_icon:
+        embed.set_author(name=f"{nombre_perfil}#{tag_perfil}", icon_url=rank_icon)
     embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
 
@@ -283,6 +288,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         embed.add_field(name="📊 Partidas", value=f"**{db_stats['total_matches']}**", inline=True)
         embed.add_field(name="⚔️ ACS (Combate)", value=acs_txt, inline=True)
         embed.add_field(name="🎯 KDA", value=kda_txt, inline=True)
+        embed.add_field(name="📊 KAST",    value=f"**{s.get('kast', 0)}%**", inline=True)
         
         if top_agents_db:
             lineups_links = []
@@ -369,13 +375,12 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
         
         nombre_lb = p['nombre']
         tag_lb = p['tag']
-        main_agent = p['main_agent'] or "Desconocido"
         acs_val = round(p['acs_medio'], 1)
         kda_val = round((p['tk'] + p['ta']) / max(p['td'], 1), 2)
         partidas_jugadas = p['total_matches']
 
         stats_txt = f"**ACS:** {acs_val} | **KDA:** {kda_val} | **Partidas:** {partidas_jugadas}"
-        embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb} ({main_agent})", value=stats_txt, inline=False)
+        embed.add_field(name=f"{medalla} {nombre_lb}#{tag_lb}", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
 

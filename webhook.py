@@ -38,12 +38,13 @@ def safe_get(url, headers):
 
 def analyze_matches(matches, puuid, username, tag):
     if not matches:
-        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "agent": "Desconocido", "top_agents": []}
+        return {"kda": 0, "winrate": 0, "trend": "➖", "hs": 0, "adr": 0, "acs": 0, "kast": 0, "agent": "Desconocido", "top_agents": []}
 
     kills, deaths, assists, wins = 0, 0, 0, 0
     headshots, bodyshots, legshots = 0, 0, 0
     damage, rounds, score = 0, 0, 0
     kdas_history = []
+    kast_rounds_list = []
     agents_played = []
     total_matches = 0
 
@@ -101,6 +102,25 @@ def analyze_matches(matches, puuid, username, tag):
             if teams.get(team, {}).get("has_won"):
                 wins += 1
 
+        # KAST por ronda
+        rondas_kast = 0
+        all_rounds = m.get("rounds", [])
+        for rnd in all_rounds:
+            for ps in rnd.get("player_stats", []):
+                nombre_rnd = (ps.get("player_display_name") or "")
+                ps_puuid = ps.get("player_puuid", "")
+                if not ((puuid and ps_puuid == puuid) or nombre_rnd.lower().startswith(username.lower())):
+                    continue
+                rnd_k  = ps.get("kills", 0)
+                rnd_a  = ps.get("assists", 0)
+                surv   = ps.get("survived", False)
+                traded = ps.get("was_traded", False)
+                if rnd_k > 0 or rnd_a > 0 or surv or traded:
+                    rondas_kast += 1
+                break
+        rondas_totales = len(all_rounds) if all_rounds else r
+        kast_rounds_list.append((rondas_kast, max(rondas_totales, 1)))
+
         total_matches += 1
 
     if total_matches == 0:
@@ -121,6 +141,11 @@ def analyze_matches(matches, puuid, username, tag):
     top_agents = [agent for agent, count in agent_counts.most_common()]
     most_played = top_agents[0] if top_agents else "Desconocido"
 
+    # Cálculo de KAST
+    total_kast_ok    = sum(x[0] for x in kast_rounds_list)
+    total_kast_total = sum(x[1] for x in kast_rounds_list)
+    kast_pct = round((total_kast_ok / max(total_kast_total, 1)) * 100, 1)
+
     return {
         "kda": round((kills + assists) / max(deaths, 1), 2),
         "winrate": round((wins / total_matches) * 100, 1),
@@ -128,6 +153,7 @@ def analyze_matches(matches, puuid, username, tag):
         "hs": round((headshots / max(total_shots, 1)) * 100, 1),
         "adr": round(damage / max(rounds, 1), 1),
         "acs": round(score / max(rounds, 1), 1),
+        "kast": kast_pct,
         "agent": most_played,
         "top_agents": top_agents
     }
@@ -157,6 +183,7 @@ def obtener_stats(username, tag, region="eu"):
     mmr_data = mmr_json.get("data", {}) if mmr_status == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
+    rank_icon = mmr_data.get("images", {}).get("small", "")
 
     # 3. OBTIENE EL HISTORIAL
     if puuid:
@@ -224,6 +251,7 @@ def obtener_stats(username, tag, region="eu"):
         "nivel": acc.get("account_level", 0),
         "card": acc.get("card", {}).get("small", ""),
         "rank": rank,
+        "rank_icon": rank_icon,
         "rr": rr,
         "mapa": mapa,
         "modo": modo,
@@ -232,6 +260,7 @@ def obtener_stats(username, tag, region="eu"):
         "hs": analysis["hs"],
         "adr": analysis["adr"],
         "acs": analysis["acs"],
+        "kast":  analysis.get("kast", 0),
         "trend": analysis["trend"],
         "smurf": is_smurf,
         "last_match": last_match_info,
