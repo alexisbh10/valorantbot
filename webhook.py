@@ -24,16 +24,21 @@ def set_cache(k, v):
 
 def safe_get(url, headers):
     try:
-        # 20 SEGUNDOS de paciencia. El historial de partidas a veces tarda en cargar.
         r = requests.get(url, headers=headers, timeout=20)
+        if not r.content:
+            print(f"[safe_get] Respuesta vacía: {url}")
+            return r.status_code, {}
         try:
             data = r.json()
-        except:
+        except Exception:
+            print(f"[safe_get] JSON inválido (HTTP {r.status_code}): {r.text[:300]}")
             data = {}
         return r.status_code, data
     except requests.exceptions.Timeout:
+        print(f"[safe_get] Timeout: {url}")
         return 408, {}
     except Exception as e:
+        print(f"[safe_get] Error: {e}")
         return 500, {}
 
 def analyze_matches(matches, puuid, username, tag):
@@ -95,7 +100,6 @@ def analyze_matches(matches, puuid, username, tag):
         rounds += r
         score += sc
 
-        # Daño recibido (damage_received viene del player o del stats)
         dmg_recv = player.get("damage_received") or stats.get("damage_received") or 0
         damage_received_total += dmg_recv
 
@@ -108,64 +112,56 @@ def analyze_matches(matches, puuid, username, tag):
             if teams.get(team, {}).get("has_won"):
                 wins += 1
 
-        # ── KAST reconstruido desde kill_events de cada ronda ──────────────────
-        # La API v3 de Henrik devuelve rounds[].player_stats[] con:
-        #   - kills[]           → muertes causadas por el jugador en esa ronda
-        #   - damage[]          → daño hecho (implica que estuvo activo)
-        #   - economy.spent     → oro gastado (sobrevivió si compró al inicio)
-        # "Survived" → el jugador no aparece en ningún kill_event como víctima
-        # "Traded"   → murió pero en ≤5s alguien del equipo mató a su asesino
-
+        # ── KAST desde kill_events de cada ronda (Henrik API v3) ─────────────
         match_rounds = m.get("rounds", [])
         kast_rounds_total += len(match_rounds)
 
         for rnd in match_rounds:
             kill_events = rnd.get("kill_events", [])
-            player_rnd_stats = None
+
+            player_rnd = None
             for ps in rnd.get("player_stats", []):
                 ps_puuid = ps.get("player_puuid", "")
-                ps_name  = (ps.get("player_display_name") or "").split("#")[0]
-                if (puuid and ps_puuid == puuid) or ps_name.lower() == username.lower():
-                    player_rnd_stats = ps
+                display  = ps.get("player_display_name") or ""
+                ps_name  = display.split("#")[0].lower()
+                if (puuid and ps_puuid == puuid) or ps_name == username.lower():
+                    player_rnd = ps
                     break
 
-            rnd_kills   = len(player_rnd_stats.get("kills", [])) if player_rnd_stats else 0
-            rnd_assists = len(player_rnd_stats.get("damage", [])) if player_rnd_stats else 0  # asistencia via daño
+            rnd_k = len(player_rnd.get("kills", [])) if player_rnd else 0
 
-            # Asistencias reales: aparece en "assistants" de algún kill_event
-            rnd_real_assists = sum(
+            rnd_a = sum(
                 1 for ke in kill_events
-                if any((puuid and a == puuid) or a == username for a in ke.get("assistants", []))
+                if any(
+                    (puuid and a == puuid) or a.split("#")[0].lower() == username.lower()
+                    for a in ke.get("assistants", [])
+                )
             )
 
-            # Survived: el jugador NO aparece como víctima en ningún kill_event de la ronda
             survived = not any(
                 (puuid and ke.get("victim_puuid") == puuid) or
-                ke.get("victim_display_name", "").split("#")[0].lower() == username.lower()
+                (ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
                 for ke in kill_events
             )
 
-            # Traded: murió PERO alguien del equipo mató a su asesino en ≤5000ms
             traded = False
             if not survived:
-                # Buscar quién lo mató y cuándo
                 my_death = next(
                     (ke for ke in kill_events if
                      (puuid and ke.get("victim_puuid") == puuid) or
-                     ke.get("victim_display_name", "").split("#")[0].lower() == username.lower()),
+                     (ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
                     None
                 )
                 if my_death:
                     killer_puuid = my_death.get("killer_puuid", "")
                     death_time   = my_death.get("kill_time_in_round", 0)
-                    # ¿Alguien del equipo mató al asesino en los siguientes 5000ms?
                     traded = any(
                         ke.get("victim_puuid") == killer_puuid and
                         abs(ke.get("kill_time_in_round", 0) - death_time) <= 5000
                         for ke in kill_events
                     )
 
-            if rnd_kills > 0 or rnd_real_assists > 0 or survived or traded:
+            if rnd_k > 0 or rnd_a > 0 or survived or traded:
                 kast_rounds_ok += 1
 
         total_matches += 1
@@ -229,6 +225,7 @@ def obtener_stats(username, tag, region="eu"):
     mmr_data = mmr_json.get("data", {}) if mmr_status == 200 else {}
     rank = mmr_data.get("currenttierpatched", "Unranked")
     rr = mmr_data.get("ranking_in_tier", 0)
+    rank_icon = mmr_data.get("images", {}).get("small", "")
 
     # 3. OBTIENE EL HISTORIAL
     if puuid:
@@ -296,6 +293,7 @@ def obtener_stats(username, tag, region="eu"):
         "nivel": acc.get("account_level", 0),
         "card": acc.get("card", {}).get("small", ""),
         "rank": rank,
+        "rank_icon": rank_icon,
         "rr": rr,
         "mapa": mapa,
         "modo": modo,

@@ -205,10 +205,19 @@ async def fetch_stats(nombre, tag, region="eu"):
                 json={"username": nombre, "tag": tag, "region": region},
                 timeout=30
             )
-            data = r.json()
+            if not r.content:
+                return None, "El servidor de stats no respondió (respuesta vacía). ¿Está activo el webhook?"
+            try:
+                data = r.json()
+            except Exception:
+                return None, f"Respuesta inválida del webhook (HTTP {r.status_code}): {r.text[:200]}"
             if not data.get("success"):
                 return None, data.get("error", "Error de la API")
             return data.get("stats", {}), None
+        except requests.exceptions.ConnectionError:
+            return None, f"No se puede conectar al webhook ({TRACKER_URL}). ¿Está activo?"
+        except requests.exceptions.Timeout:
+            return None, "El webhook tardó demasiado en responder (timeout 30s)."
         except Exception as e:
             return None, str(e)
     
@@ -277,9 +286,9 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
     embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
     embed.add_field(name="📊 KAST", value=f"**{s.get('kast', 0)}%**", inline=True)
-    delta = s.get('damage_delta', 0)
-    delta_icon = "🟢" if delta >= 0 else "🔴"
-    embed.add_field(name="⚔️ Delta Daño/Ronda", value=f"{delta_icon} **{'+' if delta >= 0 else ''}{delta}**", inline=True)
+    _delta = s.get('damage_delta', 0)
+    _dicon = "🟢" if _delta >= 0 else "🔴"
+    embed.add_field(name="⚔️ Delta Daño/Ronda", value=f"{_dicon} **{'+' if _delta >= 0 else ''}{_delta}**", inline=True)
 
     # DATOS ESTRICTOS POR MODO DE JUEGO
     if tiene_datos_db:
