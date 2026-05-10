@@ -117,52 +117,65 @@ def analyze_matches(matches, puuid, username, tag):
         kast_rounds_total += len(match_rounds)
 
         for rnd in match_rounds:
-            kill_events = rnd.get("kill_events", [])
+            try:
+                kill_events = rnd.get("kill_events", [])
 
-            player_rnd = None
-            for ps in rnd.get("player_stats", []):
-                ps_puuid = ps.get("player_puuid", "")
-                display  = ps.get("player_display_name") or ""
-                ps_name  = display.split("#")[0].lower()
-                if (puuid and ps_puuid == puuid) or ps_name == username.lower():
-                    player_rnd = ps
-                    break
+                # Buscar al jugador en player_stats de esta ronda
+                player_rnd = None
+                for ps in rnd.get("player_stats", []):
+                    ps_puuid = ps.get("player_puuid", "")
+                    display  = str(ps.get("player_display_name") or "")
+                    ps_name  = display.split("#")[0].lower()
+                    if (puuid and ps_puuid == puuid) or ps_name == username.lower():
+                        player_rnd = ps
+                        break
 
-            rnd_k = len(player_rnd.get("kills", [])) if player_rnd else 0
+                # K: kills puede ser lista de objetos o entero según versión de Henrik
+                raw_k = player_rnd.get("kills", 0) if player_rnd else 0
+                rnd_k = len(raw_k) if isinstance(raw_k, list) else int(raw_k or 0)
 
-            rnd_a = sum(
-                1 for ke in kill_events
-                if any(
-                    (puuid and a == puuid) or a.split("#")[0].lower() == username.lower()
-                    for a in ke.get("assistants", [])
+                # A: asistencias — assistants puede ser lista de puuids o de "Name#Tag"
+                rnd_a = 0
+                for ke in kill_events:
+                    for a in (ke.get("assistants") or []):
+                        if not a:
+                            continue
+                        if (puuid and a == puuid) or str(a).split("#")[0].lower() == username.lower():
+                            rnd_a += 1
+                            break
+
+                # S: el jugador no aparece como víctima
+                survived = not any(
+                    (puuid and ke.get("victim_puuid") == puuid) or
+                    str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
+                    for ke in kill_events
                 )
-            )
 
-            survived = not any(
-                (puuid and ke.get("victim_puuid") == puuid) or
-                (ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()
-                for ke in kill_events
-            )
-
-            traded = False
-            if not survived:
-                my_death = next(
-                    (ke for ke in kill_events if
-                     (puuid and ke.get("victim_puuid") == puuid) or
-                     (ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
-                    None
-                )
-                if my_death:
-                    killer_puuid = my_death.get("killer_puuid", "")
-                    death_time   = my_death.get("kill_time_in_round", 0)
-                    traded = any(
-                        ke.get("victim_puuid") == killer_puuid and
-                        abs(ke.get("kill_time_in_round", 0) - death_time) <= 5000
-                        for ke in kill_events
+                # T: murió pero alguien vengó su muerte en ≤5000ms
+                traded = False
+                if not survived:
+                    my_death = next(
+                        (ke for ke in kill_events if
+                         (puuid and ke.get("victim_puuid") == puuid) or
+                         str(ke.get("victim_display_name") or "").split("#")[0].lower() == username.lower()),
+                        None
                     )
+                    if my_death:
+                        killer_puuid = my_death.get("killer_puuid", "")
+                        death_time   = int(my_death.get("kill_time_in_round") or 0)
+                        traded = any(
+                            ke.get("victim_puuid") == killer_puuid and
+                            abs(int(ke.get("kill_time_in_round") or 0) - death_time) <= 5000
+                            for ke in kill_events
+                        )
 
-            if rnd_k > 0 or rnd_a > 0 or survived or traded:
-                kast_rounds_ok += 1
+                if rnd_k > 0 or rnd_a > 0 or survived or traded:
+                    kast_rounds_ok += 1
+
+            except Exception as e:
+                # Si una ronda falla por estructura inesperada, la saltamos sin romper nada
+                print(f"[KAST] Error procesando ronda: {e}")
+                continue
 
         total_matches += 1
 
