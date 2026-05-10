@@ -7,6 +7,9 @@ import logging
 import asyncio
 import urllib.parse
 import asyncpg
+import io
+import random
+from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
 
 from discord import app_commands
@@ -206,7 +209,7 @@ async def fetch_stats(nombre, tag, region="eu"):
                 timeout=30
             )
             if not r.content:
-                return None, "El servidor de stats no respondió (respuesta vacía). ¿Está activo el webhook?"
+                return None, "El servidor de stats no respondió (respuesta vacía)."
             try:
                 data = r.json()
             except Exception:
@@ -222,6 +225,167 @@ async def fetch_stats(nombre, tag, region="eu"):
             return None, str(e)
     
     return await asyncio.to_thread(_request)
+
+
+def _load_fonts():
+    try:
+        r1  = requests.get("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", timeout=10)
+        r2f = requests.get("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf",    timeout=10)
+        return (
+            lambda s: ImageFont.truetype(io.BytesIO(r2f.content), s),
+            lambda s: ImageFont.truetype(io.BytesIO(r1.content),  s),
+        )
+    except:
+        f = ImageFont.load_default()
+        return lambda s: f, lambda s: f
+
+_FB, _FR = _load_fonts()
+
+def _rank_palette(rank):
+    r = (rank or '').lower()
+    d = {
+        'radiant':   ((255, 228,  80), (255, 200,  30)),
+        'immortal':  ((220,  70, 100), (180,  30,  65)),
+        'ascendant': ((55,  210, 130), (20,  155,  80)),
+        'diamond':   ((170, 105, 240), (100,  45, 195)),
+        'platinum':  ((75,  185, 235), (30,  115, 185)),
+        'gold':      ((240, 190,  55), (190, 135,  20)),
+        'silver':    ((195, 195, 205), (130, 130, 145)),
+        'bronze':    ((200, 125,  55), (140,  80,  20)),
+        'iron':      ((115, 115, 120), (70,   70,  75)),
+    }
+    for key, pal in d.items():
+        if key in r: return pal
+    return ((255, 70, 85), (200, 20, 40))
+
+def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
+    acc1, acc2 = _rank_palette(s.get('rank', ''))
+    W, H, PAD = 1000, 560, 36
+    WHITE = (255, 255, 255); GRAY = (145, 142, 158); FAINT = (72, 70, 86)
+    POS = (72, 224, 130);    NEG  = (224, 78, 78)
+
+    img = Image.new('RGB', (W, H), (12, 10, 16))
+    draw = ImageDraw.Draw(img)
+
+    # Noise
+    rng = random.Random(42)
+    for _ in range(7000):
+        x, y = rng.randint(0, W-1), rng.randint(0, H-1)
+        v = rng.randint(18, 28)
+        draw.point((x, y), fill=(v, v, v+4))
+
+    # Glow top-left
+    for r in range(320, 0, -4):
+        alpha = int(28 * (1 - r/320))
+        c = tuple(min(255, int(acc1[j]*alpha/255 + 12)) for j in range(3))
+        draw.ellipse((-r//3, -r//3, r, r), fill=c)
+
+    # Glow bottom-right
+    for r in range(200, 0, -4):
+        alpha = int(18 * (1 - r/200))
+        c = tuple(min(255, int(acc2[j]*alpha/255 + 10)) for j in range(3))
+        draw.ellipse((W-r, H-r, W+r//3, H+r//3), fill=c)
+
+    # Left stripe
+    for i in range(7):
+        a = 1 - i*0.14
+        draw.rectangle([i, 0, i+1, H], fill=tuple(int(acc1[j]*a) for j in range(3)))
+
+    def ctext(cx, y, text, font, fill):
+        bb = draw.textbbox((0,0), text, font=font)
+        draw.text((cx-(bb[2]-bb[0])//2, y), text, font=font, fill=fill)
+
+    # Rank icon
+    ix2 = PAD
+    try:
+        ri_data = requests.get(s.get('rank_icon', ''), timeout=6)
+        ri = Image.open(io.BytesIO(ri_data.content)).convert('RGBA').resize((82, 82))
+        img.paste(ri, (PAD, PAD), ri)
+        ix2 = PAD + 82 + 18
+    except: pass
+
+    # Player card faded right
+    try:
+        card_raw = Image.open(io.BytesIO(requests.get(s.get('card', ''), timeout=6).content)).convert('RGBA')
+        cw, ch = 130, 190
+        card_img = card_raw.resize((cw, ch))
+        mask = Image.new('L', (cw, ch))
+        for x in range(cw):
+            v = int((x/cw)**1.5 * 210)
+            for y in range(ch):
+                edge = min(y, ch-y) / 30
+                mask.putpixel((x, y), int(min(v, 200) * min(edge, 1)))
+        card_img.putalpha(mask)
+        img.paste(card_img, (W-cw-6, 10), card_img)
+    except: pass
+
+    # Header
+    draw.text((ix2, PAD),    f"{s.get('nombre', '?')}#{s.get('tag', '?')}",            font=_FB(50), fill=WHITE)
+    draw.text((ix2, PAD+58), f"{s.get('rank', 'Unranked')}  ·  {s.get('rr', 0)} RR  ·  Nv. {s.get('nivel', '?')}  ·  {modo_display}", font=_FR(19), fill=GRAY)
+
+    # Sep 1
+    S1 = 130
+    draw.rectangle([PAD, S1, W-PAD, S1+1], fill=acc1)
+
+    # 5 stats
+    stats5 = [("KDA", str(s.get('kda',0))), ("ACS", str(s.get('acs',0))), ("ADR", str(s.get('adr',0))), ("HS%", f"{s.get('hs',0)}%"), ("KAST", f"{s.get('kast',0)}%")]
+    tile_w = (W-PAD*2)//5
+    for i, (lbl, val) in enumerate(stats5):
+        cx = PAD + i*tile_w + tile_w//2
+        ctext(cx, S1+22, val, _FB(48), WHITE)
+        ctext(cx, S1+80, lbl, _FR(14), GRAY)
+    for i in range(1, 5):
+        xd = PAD + i*tile_w
+        draw.rectangle([xd-1, S1+10, xd, S1+96], fill=FAINT)
+
+    # Sep 2
+    S2 = S1 + 106
+    draw.rectangle([PAD, S2, W-PAD, S2+1], fill=FAINT)
+
+    # Row 2
+    delta   = s.get('damage_delta', 0)
+    delta_s = ('+ ' if delta>=0 else '- ') + str(abs(delta))
+    delta_c = POS if delta>=0 else NEG
+    row2 = [("DELTA DÑO/RND", delta_s, delta_c), ("TENDENCIA", s.get('trend',''), WHITE), ("WINRATE BD", f"{round(db_stats['winrate'],1)}%" if tiene_datos_db else "—", WHITE), ("PARTIDAS BD", str(db_stats['total_matches']) if tiene_datos_db else "—", WHITE)]
+    tile_w2 = (W-PAD*2)//4
+    for i, (lbl, val, clr) in enumerate(row2):
+        cx = PAD + i*tile_w2 + tile_w2//2
+        ctext(cx, S2+14, lbl, _FR(13), GRAY)
+        ctext(cx, S2+32, val, _FB(26), clr)
+
+    # Sep 3
+    S3 = S2 + 72
+    draw.rectangle([PAD, S3, W-PAD, S3+1], fill=FAINT)
+
+    # Last match
+    lm = s.get('last_match', {})
+    Y3 = S3 + 16
+    if lm:
+        res_c = POS if lm.get('won') else NEG
+        res_t = "✓ VICTORIA" if lm.get('won') else "✗ DERROTA"
+        draw.text((PAD+12, Y3),    "ÚLTIMA PARTIDA",  font=_FR(13), fill=GRAY)
+        draw.text((PAD+12, Y3+18), res_t,             font=_FB(22), fill=res_c)
+        draw.text((PAD+165, Y3+18), f"{lm.get('agente','?')}  ·  {lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}  ·  ACS {lm.get('acs',0)}", font=_FB(22), fill=WHITE)
+
+    # Agents
+    if top_agents_db:
+        agents_txt = "  ·  ".join(a for a in top_agents_db if a != "Desconocido")
+        if agents_txt:
+            draw.text((PAD+12, Y3+50), f"AGENTES   {agents_txt}", font=_FR(14), fill=GRAY)
+
+    # Footer
+    draw.text((PAD+12, H-26), f"{s.get('mapa','?')}  ·  HenrikDev API", font=_FR(13), fill=FAINT)
+    draw.ellipse((W-PAD-6, H-20, W-PAD+6, H-8), fill=acc1)
+
+    # Rounded corners
+    mask_img = Image.new('L', (W, H), 0)
+    ImageDraw.Draw(mask_img).rounded_rectangle([0,0,W,H], radius=20, fill=255)
+    img.putalpha(mask_img)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return buf
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -239,9 +403,6 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     if err or not s:
         await interaction.followup.send(f"❌ Fallo al buscar a {nombre}#{tag}: {err}")
         return
-
-    nombre_perfil = s.get('nombre') or nombre
-    tag_perfil    = s.get('tag') or tag
 
     # Buscamos en la BD con filtro estricto de modo
     db_stats = await bot.db.fetchrow("""
@@ -262,144 +423,39 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         ORDER BY count DESC
     """, nombre, tag, modo_busqueda)
 
-    top_agents_db = [r['agente'] for r in agent_rows]
+    top_agents_db  = [r['agente'] for r in agent_rows]
     tiene_datos_db = db_stats and db_stats['total_matches'] > 0
 
-    # ── Helpers visuales ─────────────────────────────────────────────────────
-    def bar(val, mx=100, n=8):
-        f = max(0, min(n, round((val / max(mx, 1)) * n)))
-        return '█' * f + '░' * (n - f)
+    buf = await asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats or {}, top_agents_db)
+    archivo = discord.File(fp=buf, filename="stats.png")
 
+    # Embed mínimo para el color de rango + links de setups
+    rank_str = s.get('rank', 'Unranked')
     def rank_color(r):
         r = (r or '').lower()
-        if 'radiant'   in r: return 0xFFF4C2
+        if 'radiant'   in r: return 0xFEFFB3
         if 'immortal'  in r: return 0xBD4863
         if 'ascendant' in r: return 0x4CB87A
         if 'diamond'   in r: return 0x9B72CF
         if 'platinum'  in r: return 0x5EAAD7
         if 'gold'      in r: return 0xE8B84B
-        if 'silver'    in r: return 0xB0B0B0
+        if 'silver'    in r: return 0xA8A8A8
         if 'bronze'    in r: return 0xC07B35
         if 'iron'      in r: return 0x6E6E6E
         return 0xFF4655
+    embed = discord.Embed(color=0x9333EA if s.get('smurf') else rank_color(rank_str))
+    embed.set_image(url="attachment://stats.png")
 
-    rank_str  = s.get('rank', 'Unranked')
-    rank_icon = s.get('rank_icon', '')
-    rr_val    = s.get('rr', 0)
-    hs_val    = s.get('hs', 0)
-    kast_val  = s.get('kast', 0)
-    adr_val   = s.get('adr', 0)
-    acs_val   = s.get('acs', 0)
-    kda_val   = s.get('kda', 0)
-    delta     = s.get('damage_delta', 0)
-    trend     = s.get('trend', 'Estable')
-    smurf     = s.get('smurf', False)
+    if tiene_datos_db and top_agents_db:
+        links = []
+        for agent in top_agents_db:
+            if agent == 'Desconocido': continue
+            links.append(f"[{agent}](https://lineupsvalorant.com/?agent={urllib.parse.quote(agent)})")
+        if links:
+            embed.add_field(name="📚 Setups", value="  ·  ".join(links), inline=False)
 
-    color = 0x9333EA if smurf else rank_color(rank_str)
+    await interaction.followup.send(file=archivo, embed=embed)
 
-    smurf_txt = "\n⚠️ **ALERTA SMURF / CARREADITO**" if smurf else ""
-    desc = f"**{rank_str}** — {rr_val} RR  ·  Nv. {s.get('nivel', '?')}  ·  {modo_display}" + smurf_txt
-
-    embed = discord.Embed(
-        title=("🚨" if smurf else "📊") + f"  {nombre_perfil}#{tag_perfil}",
-        description=desc,
-        color=color
-    )
-
-    if rank_icon:
-        embed.set_author(name=f"{nombre_perfil}#{tag_perfil}", icon_url=rank_icon)
-    if s.get('card'):
-        embed.set_thumbnail(url=s.get('card'))
-
-    # ── Bloque 1: Stats globales ──────────────────────────────────────────────
-    delta_sign = ('+' if delta >= 0 else '') + str(delta)
-    delta_icon = "🟢" if delta >= 0 else "🔴"
-
-    embed.add_field(
-        name="🎯  KDA  ·  ACS  ·  ADR",
-        value=f"```\nKDA  {kda_val:<6}  ACS  {acs_val:<6}  ADR  {adr_val}\n```",
-        inline=False
-    )
-    embed.add_field(
-        name="💥  Headshot %",
-        value=f"`{bar(hs_val)}` **{hs_val}%**",
-        inline=True
-    )
-    embed.add_field(
-        name="📊  KAST",
-        value=f"`{bar(kast_val)}` **{kast_val}%**",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{delta_icon}  Delta Daño/Ronda",
-        value=f"**{delta_sign}**",
-        inline=True
-    )
-    embed.add_field(
-        name="📈  Tendencia",
-        value=f"**{trend}**",
-        inline=True
-    )
-
-    # ── Bloque 2: Datos BD por modo ───────────────────────────────────────────
-    if tiene_datos_db:
-        kda_db = round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)
-        wr_db  = round(db_stats['winrate'], 1)
-        acs_db = round(db_stats['acs_medio'], 1)
-        nm_db  = db_stats['total_matches']
-
-        embed.add_field(name="\u200b", value=f"**— {modo_display} (BD) —**", inline=False)
-        embed.add_field(
-            name="🏆  Winrate",
-            value=f"`{bar(wr_db)}` **{wr_db}%**",
-            inline=True
-        )
-        embed.add_field(name="🎮  Partidas", value=f"**{nm_db}**", inline=True)
-        embed.add_field(
-            name="⚔️  KDA  ·  ACS",
-            value=f"**{kda_db}**  ·  **{acs_db}**",
-            inline=True
-        )
-
-        if top_agents_db:
-            links = []
-            for agent in top_agents_db:
-                if agent == "Desconocido":
-                    continue
-                links.append(f"[{agent}](https://lineupsvalorant.com/?agent={urllib.parse.quote(agent)})")
-            if links:
-                txt = " · ".join(links)
-                if len(txt) > 1000:
-                    txt = txt[:990] + "…"
-                embed.add_field(name="📚  Setups", value=txt, inline=False)
-    else:
-        embed.add_field(
-            name="ℹ️  Sin datos en BD",
-            value=f"Aún no hay partidas de **{modo_display}** guardadas. Usad `/add` y jugad.",
-            inline=False
-        )
-
-    # ── Última partida ────────────────────────────────────────────────────────
-    lm = s.get('last_match', {})
-    if lm:
-        lm_result = "✅ Victoria" if lm.get('won') else "❌ Derrota"
-        lm_kda    = f"{lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}"
-        lm_agent  = lm.get('agente', '?')
-        lm_acs    = lm.get('acs', 0)
-        embed.add_field(
-            name="🕹️  Última partida",
-            value=f"{lm_result}  ·  {lm_agent}  ·  `{lm_kda}`  ·  ACS **{lm_acs}**",
-            inline=False
-        )
-
-    mapa_str = s.get('mapa', '?')
-    modo_str = s.get('modo', '?')
-    embed.set_footer(
-        text=f"Última partida: {modo_str} en {mapa_str}",
-        icon_url=rank_icon if rank_icon else None
-    )
-
-    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="add", description="Guarda a un colega en la base de datos del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
