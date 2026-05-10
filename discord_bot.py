@@ -264,6 +264,14 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     WHITE = (255, 255, 255); GRAY = (145, 142, 158); FAINT = (72, 70, 86)
     POS = (72, 224, 130);    NEG  = (224, 78, 78)
 
+    def strip_emojis(text):
+        # Replace known trend emojis with ASCII, then remove any remaining non-BMP chars
+        text = text.replace('📈', '(+)').replace('📉', '(-)').replace('➖', '(=)')
+        text = text.replace('⬆', '^').replace('⬇', 'v').replace('➡', '->')
+        # Remove any remaining emoji / non-BMP Unicode (codepoints > U+FFFF)
+        return ''.join(c for c in text if ord(c) <= 0xFFFF)
+
+
     img = Image.new('RGB', (W, H), (12, 10, 16))
     draw = ImageDraw.Draw(img)
 
@@ -351,7 +359,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     for i, (lbl, val, clr) in enumerate(row2):
         cx = PAD + i*tile_w2 + tile_w2//2
         ctext(cx, S2+14, lbl, _FR(13), GRAY)
-        ctext(cx, S2+32, val, _FB(26), clr)
+        ctext(cx, S2+32, strip_emojis(val), _FB(26), clr)
 
     # Sep 3
     S3 = S2 + 72
@@ -364,14 +372,15 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         res_c = POS if lm.get('won') else NEG
         res_t = "✓ VICTORIA" if lm.get('won') else "✗ DERROTA"
         draw.text((PAD+12, Y3),    "ÚLTIMA PARTIDA",  font=_FR(13), fill=GRAY)
-        draw.text((PAD+12, Y3+18), res_t,             font=_FB(22), fill=res_c)
-        draw.text((PAD+165, Y3+18), f"{lm.get('agente','?')}  ·  {lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}  ·  ACS {lm.get('acs',0)}", font=_FB(22), fill=WHITE)
+        draw.text((PAD+12, Y3+18), res_t, font=_FB(22), fill=res_c)
+        lm_rest = strip_emojis(f"{lm.get('agente','?')}  ·  {lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}  ·  ACS {lm.get('acs',0)}")
+        draw.text((PAD+165, Y3+18), lm_rest, font=_FB(22), fill=WHITE)
 
     # Agents
     if top_agents_db:
         agents_txt = "  ·  ".join(a for a in top_agents_db if a != "Desconocido")
         if agents_txt:
-            draw.text((PAD+12, Y3+50), f"AGENTES   {agents_txt}", font=_FR(14), fill=GRAY)
+            draw.text((PAD+12, Y3+50), strip_emojis(f"AGENTES   {agents_txt}"), font=_FR(14), fill=GRAY)
 
     # Footer
     draw.text((PAD+12, H-26), f"{s.get('mapa','?')}  ·  HenrikDev API", font=_FR(13), fill=FAINT)
