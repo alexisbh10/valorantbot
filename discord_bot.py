@@ -191,13 +191,21 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     except Exception:
         pass
 
+    kda_show = None
+    acs_show = None
+    if tiene_datos_db and db_stats:
+        tk = db_stats.get("tk") or 0
+        td = db_stats.get("td") or 0
+        ta = db_stats.get("ta") or 0
+        kda_show = round((tk + ta) / max(td, 1), 2) if db_stats.get("total_matches") else None
+        acs_show = db_stats.get("acs_medio")
     adr_show = db_stats.get("adr_medio") if (tiene_datos_db and db_stats) else s.get("adr")
     kast_show = db_stats.get("kast_medio") if (tiene_datos_db and db_stats) else s.get("kast")
     dda_show = db_stats.get("dda_medio") if (tiene_datos_db and db_stats) else (s.get("dda") or s.get("damage_delta"))
 
     cards = [
-        ("KDA", str(s.get("kda", "0"))),
-        ("ACS", str(s.get("acs", "0"))),
+        ("KDA", fmt_num(kda_show, 2) if kda_show is not None else str(s.get("kda", "0"))),
+        ("ACS", fmt_num(acs_show) if acs_show is not None else str(s.get("acs", "0"))),
         ("ADR", fmt_num(adr_show)),
         ("HS%", f"{s.get('hs', 0)}%"),
         ("KAST", fmt_num(kast_show, suffix="%")),
@@ -229,7 +237,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         ("DDA / Ronda", fmt_num(dda_show), delta_color),
         ("Winrate", fmt_num(db_stats.get("winrate") if tiene_datos_db else None, suffix="%"), TEXT),
         ("Partidas", str(db_stats.get("total_matches")) if (tiene_datos_db and db_stats and db_stats.get("total_matches") is not None) else "—", TEXT),
-        ("Tendencia", str(s.get("trend", "—")), TEXT),
+        ("Tendencia", str(db_stats.get("trend", "—")) if (tiene_datos_db and db_stats and db_stats.get("trend") is not None) else str(s.get("trend", "—")), TEXT),
     ]
     row_y = mid_y + 98
     for idx, (label, value, color) in enumerate(db_rows):
