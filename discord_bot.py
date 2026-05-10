@@ -456,36 +456,38 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     db_stats = await bot.db.fetchrow(
         """
         SELECT
-            SUM(kills) as tk,
-            SUM(deaths) as td,
-            SUM(assists) as ta,
-            AVG(acs) as acs_medio,
-            AVG(CASE WHEN rounds_played > 0 AND damage_dealt_total IS NOT NULL
-                     THEN damage_dealt_total::numeric / rounds_played
-                     ELSE adr END) as adr_medio,
-            AVG(CASE WHEN rounds_played > 0 AND kast_rounds IS NOT NULL
-                     THEN (kast_rounds::numeric * 100.0) / rounds_played
-                     ELSE kast END) as kast_medio,
-            AVG(CASE WHEN rounds_played > 0 AND damage_dealt_total IS NOT NULL AND damage_received_total IS NOT NULL
-                     THEN (damage_dealt_total::numeric - damage_received_total::numeric) / rounds_played
-                     ELSE dda END) as dda_medio,
-            COUNT(CASE WHEN won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
+            SUM(p.kills) as tk,
+            SUM(p.deaths) as td,
+            SUM(p.assists) as ta,
+            AVG(p.acs) as acs_medio,
+            AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL
+                     THEN p.damage_dealt_total::numeric / p.rounds_played
+                     ELSE p.adr END) as adr_medio,
+            AVG(CASE WHEN p.rounds_played > 0 AND p.kast_rounds IS NOT NULL
+                     THEN (p.kast_rounds::numeric * 100.0) / p.rounds_played
+                     ELSE p.kast END) as kast_medio,
+            AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
+                     THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
+                     ELSE p.dda END) as dda_medio,
+            COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
             COUNT(*) as total_matches
-        FROM partidas
-        WHERE jugador_nombre = $1 AND jugador_tag = $2 AND modo ILIKE $3
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND p.modo ILIKE $4
         """,
-        nombre, tag, modo_busqueda,
+        str(interaction.guild_id), nombre, tag, modo_busqueda,
     )
 
     agent_rows = await bot.db.fetch(
         """
-        SELECT agente, COUNT(*) as count
-        FROM partidas
-        WHERE jugador_nombre = $1 AND jugador_tag = $2 AND modo ILIKE $3
-        GROUP BY agente
+        SELECT p.agente, COUNT(*) as count
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND p.modo ILIKE $4
+        GROUP BY p.agente
         ORDER BY count DESC
         """,
-        nombre, tag, modo_busqueda,
+        str(interaction.guild_id), nombre, tag, modo_busqueda,
     )
 
     top_agents_db = [r["agente"] for r in agent_rows]
