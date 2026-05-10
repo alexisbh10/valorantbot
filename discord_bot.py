@@ -241,7 +241,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         return
 
     nombre_perfil = s.get('nombre') or nombre
-    tag_perfil = s.get('tag') or tag
+    tag_perfil    = s.get('tag') or tag
 
     # Buscamos en la BD con filtro estricto de modo
     db_stats = await bot.db.fetchrow("""
@@ -261,66 +261,143 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         GROUP BY agente 
         ORDER BY count DESC
     """, nombre, tag, modo_busqueda)
-    
+
     top_agents_db = [r['agente'] for r in agent_rows]
     tiene_datos_db = db_stats and db_stats['total_matches'] > 0
 
-    color = 0xFF4655 if not s.get("smurf") else 0x9333EA
-    descripcion = f"Nivel {s.get('nivel')} | **Temporada: {modo_display}**"
+    # ── Helpers visuales ─────────────────────────────────────────────────────
+    def bar(val, mx=100, n=8):
+        f = max(0, min(n, round((val / max(mx, 1)) * n)))
+        return '█' * f + '░' * (n - f)
+
+    def rank_color(r):
+        r = (r or '').lower()
+        if 'radiant'   in r: return 0xFFF4C2
+        if 'immortal'  in r: return 0xBD4863
+        if 'ascendant' in r: return 0x4CB87A
+        if 'diamond'   in r: return 0x9B72CF
+        if 'platinum'  in r: return 0x5EAAD7
+        if 'gold'      in r: return 0xE8B84B
+        if 'silver'    in r: return 0xB0B0B0
+        if 'bronze'    in r: return 0xC07B35
+        if 'iron'      in r: return 0x6E6E6E
+        return 0xFF4655
+
+    rank_str  = s.get('rank', 'Unranked')
+    rank_icon = s.get('rank_icon', '')
+    rr_val    = s.get('rr', 0)
+    hs_val    = s.get('hs', 0)
+    kast_val  = s.get('kast', 0)
+    adr_val   = s.get('adr', 0)
+    acs_val   = s.get('acs', 0)
+    kda_val   = s.get('kda', 0)
+    delta     = s.get('damage_delta', 0)
+    trend     = s.get('trend', 'Estable')
+    smurf     = s.get('smurf', False)
+
+    color = 0x9333EA if smurf else rank_color(rank_str)
+
+    smurf_txt = "\n⚠️ **ALERTA SMURF / CARREADITO**" if smurf else ""
+    desc = f"**{rank_str}** — {rr_val} RR  ·  Nv. {s.get('nivel', '?')}  ·  {modo_display}" + smurf_txt
 
     embed = discord.Embed(
-        title=f"📊 Estadísticas de {nombre_perfil}#{tag_perfil}",
-        description=descripcion,
+        title=("🚨" if smurf else "📊") + f"  {nombre_perfil}#{tag_perfil}",
+        description=desc,
         color=color
     )
 
-    if s.get("card"):
-        embed.set_thumbnail(url=s.get("card"))
-
-    # DATOS GLOBALES SIEMPRE VISIBLES
-    rank_str  = s.get('rank', 'Unranked')
-    rank_icon = s.get('rank_icon', '')
-    embed.add_field(name="🏆 Rango", value=f"**{rank_str}** ({s.get('rr')} RR)", inline=True)
     if rank_icon:
         embed.set_author(name=f"{nombre_perfil}#{tag_perfil}", icon_url=rank_icon)
-    embed.add_field(name="📊 Tendencia", value=f"**{s.get('trend')}**", inline=True)
-    embed.add_field(name="💥 Headshot", value=f"{s.get('hs')}%", inline=True)
-    embed.add_field(name="📊 KAST", value=f"**{s.get('kast', 0)}%**", inline=True)
-    _delta = s.get('damage_delta', 0)
-    _dicon = "🟢" if _delta >= 0 else "🔴"
-    embed.add_field(name="⚔️ Delta Daño/Ronda", value=f"{_dicon} **{'+' if _delta >= 0 else ''}{_delta}**", inline=True)
+    if s.get('card'):
+        embed.set_thumbnail(url=s.get('card'))
 
-    # DATOS ESTRICTOS POR MODO DE JUEGO
+    # ── Bloque 1: Stats globales ──────────────────────────────────────────────
+    delta_sign = ('+' if delta >= 0 else '') + str(delta)
+    delta_icon = "🟢" if delta >= 0 else "🔴"
+
+    embed.add_field(
+        name="🎯  KDA  ·  ACS  ·  ADR",
+        value=f"```\nKDA  {kda_val:<6}  ACS  {acs_val:<6}  ADR  {adr_val}\n```",
+        inline=False
+    )
+    embed.add_field(
+        name="💥  Headshot %",
+        value=f"`{bar(hs_val)}` **{hs_val}%**",
+        inline=True
+    )
+    embed.add_field(
+        name="📊  KAST",
+        value=f"`{bar(kast_val)}` **{kast_val}%**",
+        inline=True
+    )
+    embed.add_field(
+        name=f"{delta_icon}  Delta Daño/Ronda",
+        value=f"**{delta_sign}**",
+        inline=True
+    )
+    embed.add_field(
+        name="📈  Tendencia",
+        value=f"**{trend}**",
+        inline=True
+    )
+
+    # ── Bloque 2: Datos BD por modo ───────────────────────────────────────────
     if tiene_datos_db:
-        kda_txt = f"{round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)}"
-        winrate_txt = f"{round(db_stats['winrate'], 1)}%"
-        acs_txt = f"{round(db_stats['acs_medio'], 1)}"
-        
-        embed.add_field(name="📈 Winrate (Temp.)", value=f"**{winrate_txt}**", inline=True)
-        embed.add_field(name="📊 Partidas", value=f"**{db_stats['total_matches']}**", inline=True)
-        embed.add_field(name="⚔️ ACS (Combate)", value=acs_txt, inline=True)
-        embed.add_field(name="🎯 KDA", value=kda_txt, inline=True)
-        
-        if top_agents_db:
-            lineups_links = []
-            for agent in top_agents_db:
-                if agent == "Desconocido": continue
-                agente_formateado = urllib.parse.quote(agent)
-                url = f"https://lineupsvalorant.com/?agent={agente_formateado}"
-                lineups_links.append(f"[{agent}]({url})")
-                
-            if lineups_links:
-                texto_enlaces = " | ".join(lineups_links)
-                if len(texto_enlaces) > 1000:
-                    texto_enlaces = texto_enlaces[:990] + "... (Límite)"
-                embed.add_field(name="📚 Aprende setups", value=texto_enlaces, inline=False)
-    else:
-        embed.add_field(name="ℹ️ Info del Modo", value=f"Aún no hay partidas de **{modo_display}** guardadas en la base de datos.", inline=False)
+        kda_db = round((db_stats['tk'] + db_stats['ta']) / max(db_stats['td'], 1), 2)
+        wr_db  = round(db_stats['winrate'], 1)
+        acs_db = round(db_stats['acs_medio'], 1)
+        nm_db  = db_stats['total_matches']
 
-    estado = "⚠️ ALERTA DE SMURF / CARREADITO" if s.get("smurf") else "✅ Jugador Legal"
-    modo_str = s.get('modo', 'Desconocido')
-    mapa_str = s.get('mapa', 'Desconocido')
-    embed.set_footer(text=f"Última partida: {modo_str} en {mapa_str} • {estado}")
+        embed.add_field(name="\u200b", value=f"**— {modo_display} (BD) —**", inline=False)
+        embed.add_field(
+            name="🏆  Winrate",
+            value=f"`{bar(wr_db)}` **{wr_db}%**",
+            inline=True
+        )
+        embed.add_field(name="🎮  Partidas", value=f"**{nm_db}**", inline=True)
+        embed.add_field(
+            name="⚔️  KDA  ·  ACS",
+            value=f"**{kda_db}**  ·  **{acs_db}**",
+            inline=True
+        )
+
+        if top_agents_db:
+            links = []
+            for agent in top_agents_db:
+                if agent == "Desconocido":
+                    continue
+                links.append(f"[{agent}](https://lineupsvalorant.com/?agent={urllib.parse.quote(agent)})")
+            if links:
+                txt = " · ".join(links)
+                if len(txt) > 1000:
+                    txt = txt[:990] + "…"
+                embed.add_field(name="📚  Setups", value=txt, inline=False)
+    else:
+        embed.add_field(
+            name="ℹ️  Sin datos en BD",
+            value=f"Aún no hay partidas de **{modo_display}** guardadas. Usad `/add` y jugad.",
+            inline=False
+        )
+
+    # ── Última partida ────────────────────────────────────────────────────────
+    lm = s.get('last_match', {})
+    if lm:
+        lm_result = "✅ Victoria" if lm.get('won') else "❌ Derrota"
+        lm_kda    = f"{lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}"
+        lm_agent  = lm.get('agente', '?')
+        lm_acs    = lm.get('acs', 0)
+        embed.add_field(
+            name="🕹️  Última partida",
+            value=f"{lm_result}  ·  {lm_agent}  ·  `{lm_kda}`  ·  ACS **{lm_acs}**",
+            inline=False
+        )
+
+    mapa_str = s.get('mapa', '?')
+    modo_str = s.get('modo', '?')
+    embed.set_footer(
+        text=f"Última partida: {modo_str} en {mapa_str}",
+        icon_url=rank_icon if rank_icon else None
+    )
 
     await interaction.followup.send(embed=embed)
 
