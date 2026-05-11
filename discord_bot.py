@@ -164,42 +164,15 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
-            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((92, 92))
-            img.paste(ri, (PAD + 24, PAD + 28), ri)
+            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((86, 86))
+            img.paste(ri, (PAD, 24), ri)
     except Exception:
         pass
 
-    header_top = PAD + 1
-    header_bottom = 158
-    header_h = header_bottom - header_top
-
-    profile_w = 176
-    profile_h = 96
-    profile_x = W - PAD - 26 - profile_w
-    profile_y = header_top + (header_h - profile_h) // 2
-
-    header_x = PAD + 138
-    header_right_limit = profile_x - 26
-
-    def fit_text(value, font_getter, max_width):
-        value = str(value)
-        if draw.textlength(value, font=font_getter) <= max_width:
-            return value
-        while len(value) > 3 and draw.textlength(value + "...", font=font_getter) > max_width:
-            value = value[:-1]
-        return value + "..."
-
-    name_font = _FB(42)
-    sub_font = _FM(22)
-    mode_font = _FR(18)
-
-    name_text = fit_text(f"{s.get('nombre', '?')}#{s.get('tag', '?')}", name_font, header_right_limit - header_x)
-    rank_text = fit_text(f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", sub_font, header_right_limit - header_x)
-    mode_text = fit_text(f"Modo: {modo_display}", mode_font, header_right_limit - header_x)
-
-    text(header_x, PAD + 26, name_text, name_font, TEXT)
-    text(header_x, PAD + 78, rank_text, sub_font, MUTED)
-    text(header_x, PAD + 110, mode_text, mode_font, mix(MUTED, TEXT, 0.22))
+    header_x = PAD + 104
+    text(header_x, 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(38), TEXT)
+    text(header_x, 72, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(20), MUTED)
+    text(header_x, 102, modo_display, _FR(16), MUTED)
 
     try:
         profile_url = (
@@ -213,31 +186,24 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
             pf_data = requests.get(profile_url, timeout=6)
             pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA")
 
-            scale = min(profile_w / pf.width, profile_h / pf.height)
+            max_w = 190
+            max_h = 92
+
+            scale = min(max_w / pf.width, max_h / pf.height)
             new_w = int(pf.width * scale)
             new_h = int(pf.height * scale)
+
             pf = pf.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-            plate = Image.new("RGBA", (profile_w, profile_h), (255, 255, 255, 0))
-            px = (profile_w - new_w) // 2
-            py = (profile_h - new_h) // 2
-            plate.paste(pf, (px, py), pf)
+            img_x = W - PAD - 26 - new_w
 
-            mask = Image.new("L", (profile_w, profile_h), 0)
-            md = ImageDraw.Draw(mask)
-            md.rounded_rectangle((0, 0, profile_w, profile_h), radius=18, fill=255)
+            text_top = 26
+            text_bottom = 102 + 16
+            text_center_y = (text_top + text_bottom) // 2
 
-            final_card = Image.new("RGBA", (profile_w, profile_h), (0, 0, 0, 0))
-            final_card.paste(plate, (0, 0), mask)
+            img_y = int(text_center_y - new_h / 2)
 
-            img.paste(final_card, (profile_x, profile_y), final_card)
-
-            draw.rounded_rectangle(
-                [profile_x, profile_y, profile_x + profile_w, profile_y + profile_h],
-                radius=18,
-                outline=(255, 255, 255, 46),
-                width=1
-            )
+            img.paste(pf, (img_x, img_y), pf)
     except Exception:
         pass
 
