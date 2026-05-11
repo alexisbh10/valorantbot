@@ -21,6 +21,15 @@ MODOS_DISCORD = [
     app_commands.Choice(name="Todos los modos", value="%")
 ]
 
+LINEUPS_BASE = "https://lineupsvalorant.com/?agent="
+
+AGENTES_VALORANT = [
+    "Astra", "Breach", "Brimstone", "Chamber", "Clove", "Cypher", "Deadlock",
+    "Fade", "Gekko", "Harbor", "Iso", "Jett", "KAY/O", "Killjoy", "Neon",
+    "Omen", "Phoenix", "Raze", "Reyna", "Sage", "Skye", "Sova", "Tejo",
+    "Viper", "Vyse", "Yoru"
+]
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
@@ -350,6 +359,7 @@ async def on_ready():
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild_obj = discord.Object(id=int(guild_id))
+            bot.tree.copy_global_to(guild=guild_obj)
             synced = await bot.tree.sync(guild=guild_obj)
             print(f"✅ Slash commands sincronizados en guild {guild_id}: {len(synced)}")
         else:
@@ -1177,6 +1187,17 @@ async def comparar(
         inline=False)
     await interaction.followup.send(file=archivo, embed=embed)
 
+@bot.tree.command(name="lineups", description="Muestra lineups de un agente")
+@app_commands.describe(agente="Nombre del agente")
+async def lineups(interaction: discord.Interaction, agente: str):
+    await interaction.response.defer()
+    url = f"{LINEUPS_BASE}{urllib.parse.quote(agente)}"
+    embed = discord.Embed(
+        title=f"📚 Lineups de {agente}",
+        description=f"[Abrir lineups]({url})",
+        color=0x4fd1c5,
+    )
+    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="temporada", description="Resumen competitivo de la temporada del servidor")
 async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
