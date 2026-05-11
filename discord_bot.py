@@ -90,6 +90,8 @@ def _calc_tracker_metrics_from_stats(s):
     adr = round(damage_dealt_total / rounds_played, 2) if rounds_played > 0 and damage_dealt_total > 0 else (round(_safe_float(s.get("adr") or lm.get("adr")), 2) if (s.get("adr") is not None or lm.get("adr") is not None) else None)
     dda = round((damage_dealt_total - damage_received_total) / rounds_played, 2) if rounds_played > 0 and (damage_dealt_total or damage_received_total) else (round(_safe_float(s.get("damage_delta") or s.get("dda") or lm.get("damage_delta") or lm.get("dda")), 2) if (s.get("damage_delta") is not None or s.get("dda") is not None or lm.get("damage_delta") is not None or lm.get("dda") is not None) else None)
     kast = round((kast_rounds / rounds_played) * 100, 2) if rounds_played > 0 and kast_rounds > 0 else (round(_safe_float(s.get("kast") or lm.get("kast")), 2) if (s.get("kast") is not None or lm.get("kast") is not None) else None)
+    hs_raw = lm.get("hs") if lm.get("hs") is not None else s.get("hs")
+    hs_value = round(_safe_float(hs_raw), 2) if hs_raw is not None else None
 
     return {
         "rounds_played": rounds_played or None,
@@ -99,6 +101,7 @@ def _calc_tracker_metrics_from_stats(s):
         "adr": adr,
         "dda": dda,
         "kast": kast,
+        "hs": hs_value,
     }
 
 
@@ -324,11 +327,15 @@ async def on_ready():
     await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS damage_dealt_total INTEGER;")
     await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS damage_received_total INTEGER;")
     await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS kast_rounds INTEGER;")
+    await bot.db.execute("ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS ultimo_rango VARCHAR(30);")
+    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS hs NUMERIC(5,2);")
     print("✅ Base de datos lista y estructurada.")
     print(f"✅ Bot listo en Discord: {bot.user}")
     await bot.tree.sync()
     if not vigilante_partidas.is_running():
         vigilante_partidas.start()
+    if not resumen_semanal.is_running():
+        resumen_semanal.start()
 
 
 @tasks.loop(minutes=5)
@@ -365,7 +372,8 @@ async def vigilante_partidas():
             won = lm.get("won", False)
             agente = lm.get("agente", "Desconocido")
             mapa = s.get("mapa", "Desconocido")
-            modo_formateado = s.get("modo", "Unrated").capitalize()
+            modo_raw = (s.get("modo") or "Unrated").strip()
+            modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
             total_partidas = await bot.db.fetchval(
                 "SELECT COUNT(*) FROM partidas WHERE jugador_nombre = $1 AND jugador_tag = $2",
                 nombre, tag,
@@ -377,18 +385,23 @@ async def vigilante_partidas():
                 """
                 INSERT INTO partidas (
                     match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente,
-                    adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds
+                    adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 """,
                 match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente,
                 tracker_metrics["adr"], tracker_metrics["kast"], tracker_metrics["dda"],
                 tracker_metrics["rounds_played"], tracker_metrics["damage_dealt_total"],
                 tracker_metrics["damage_received_total"], tracker_metrics["kast_rounds"],
+                s.get("last_match", {}).get("hs") if s.get("last_match", {}).get("hs") is not None else (tracker_metrics.get("hs") if tracker_metrics.get("hs") is not None else s.get("hs")),
             )
 
             if es_primera_vez:
                 continue
+
+            await _check_racha(nombre, tag, canal)
+            nuevo_rango = s.get("rank")
+            await _check_rango(nombre, tag, nuevo_rango, canal)
 
             resultado = "VICTORIA" if won else "DERROTA"
             color_borde = 0x00FF00 if won else 0xFF0000
@@ -443,7 +456,7 @@ async def fetch_stats(nombre, tag, region="eu"):
 @app_commands.choices(modo=MODOS_DISCORD)
 async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu", modo: app_commands.Choice[str] = None):
     await interaction.response.defer()
-    modo_busqueda = modo.value if modo else "Competitive"
+    modo_busqueda = "Competitive"
     modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%":
         modo_display = "Todos los modos"
@@ -469,11 +482,12 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
             AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
                      THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
                      ELSE p.dda END) as dda_medio,
+            AVG(p.hs) as hs_medio,
             COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
             COUNT(*) as total_matches
         FROM partidas p
         JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND p.modo ILIKE $4
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
         """,
         str(interaction.guild_id), nombre, tag, modo_busqueda,
     )
@@ -483,7 +497,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         SELECT p.agente, COUNT(*) as count
         FROM partidas p
         JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND p.modo ILIKE $4
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
         GROUP BY p.agente
         ORDER BY count DESC
         """,
@@ -526,7 +540,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 @app_commands.choices(modo=MODOS_DISCORD)
 async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
     server_id = str(interaction.guild_id)
-    modo_busqueda = modo.value if modo else "Competitive"
+    modo_busqueda = "Competitive"
     modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%":
         modo_display = "Todos los modos"
@@ -552,15 +566,16 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
                         ELSE p.dda END) as dda_medio,
                SUM(p.kills) as tk, SUM(p.deaths) as td, SUM(p.assists) as ta,
                COUNT(*) as total_matches,
+               AVG(p.hs) as hs_medio,
                COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
                (
                    SELECT agente FROM partidas p2
-                   WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag AND p2.modo ILIKE $2
+                   WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag AND ($2 = '%' OR LOWER(p2.modo) = LOWER($2))
                    GROUP BY agente ORDER BY COUNT(*) DESC LIMIT 1
                ) as main_agent
         FROM partidas p
         JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.modo ILIKE $2
+        WHERE j.server_id = $1 AND ($2 = '%' OR LOWER(p.modo) = LOWER($2))
         GROUP BY p.jugador_nombre, p.jugador_tag
         ORDER BY acs_medio DESC
         """,
@@ -585,6 +600,8 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
             extras.append(f"DDA {round(p['dda_medio'], 1)}")
         if p["winrate"] is not None:
             extras.append(f"WR {round(p['winrate'], 1)}%")
+        if p.get("hs_medio") is not None:
+            extras.append(f"HS {round(p['hs_medio'], 1)}%")
         stats_txt = f"**ACS:** {acs_val} | **KDA:** {kda_val} | **Partidas:** {p['total_matches']}"
         if extras:
             stats_txt += "\n" + " | ".join(extras)
@@ -592,6 +609,603 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
         embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']} ({main_agent})", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
+
+# ─────────────────────────────────────────────
+# CHART HELPERS
+# ─────────────────────────────────────────────
+
+def _gen_evolucion(rows, nombre_jugador):
+    """Genera gráfica de línea: ACS, DDA y HS% a lo largo de partidas."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+
+    fechas = [r["fecha"].strftime("%d/%m") for r in rows]
+    acs_vals = [float(r["acs"]) if r["acs"] is not None else None for r in rows]
+    dda_vals = [float(r["dda"]) if r["dda"] is not None else None for r in rows]
+    hs_vals  = [float(r["hs"]) if r.get("hs") is not None else None for r in rows]
+    indices  = list(range(len(rows)))
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 7), facecolor="#0a0b11")
+    fig.suptitle(f"Evolución de {nombre_jugador}", color="#f5f7fb", fontsize=14, fontweight="bold", y=0.98)
+
+    configs = [
+        (axes[0], acs_vals, "ACS",  "#4fd1c5", "#0a4040"),
+        (axes[1], dda_vals, "DDA",  "#fc8181", "#400a0a"),
+        (axes[2], hs_vals,  "HS%",  "#f6e05e", "#3d3300"),
+    ]
+
+    for ax, vals, label, color, fill_color in configs:
+        clean_x = [i for i, v in zip(indices, vals) if v is not None]
+        clean_v = [v for v in vals if v is not None]
+        ax.set_facecolor("#0f1119")
+        for spine in ax.spines.values():
+            spine.set_color("#2a3043")
+        ax.tick_params(colors="#96a3b3", labelsize=8)
+        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
+        ax.set_ylabel(label, color=color, fontsize=9, fontweight="bold")
+        if clean_x:
+            ax.fill_between(clean_x, clean_v, alpha=0.15, color=fill_color)
+            ax.plot(clean_x, clean_v, color=color, linewidth=2, marker="o", markersize=4)
+            ax.set_xlim(-0.5, len(indices) - 0.5)
+        ax.set_xticks(indices)
+        ax.set_xticklabels(fechas, rotation=45, ha="right", fontsize=7, color="#96a3b3")
+        ax.grid(axis="y", color="#1e2535", linewidth=0.7)
+        if label == "DDA":
+            ax.axhline(0, color="#555", linewidth=0.8, linestyle="--")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _gen_heatmap_mapas(rows):
+    """Genera heatmap: mapas × métricas (ACS, WR, DDA)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    mapa_stats = {}
+    for r in rows:
+        m = r["mapa"] or "?"
+        if m not in mapa_stats:
+            mapa_stats[m] = {"acs": [], "won": [], "dda": []}
+        if r["acs"] is not None:
+            mapa_stats[m]["acs"].append(float(r["acs"]))
+        mapa_stats[m]["won"].append(1 if r["won"] else 0)
+        if r["dda"] is not None:
+            mapa_stats[m]["dda"].append(float(r["dda"]))
+
+    mapas = sorted(mapa_stats.keys())
+    if not mapas:
+        return None
+
+    metricas = ["ACS medio", "Winrate %", "DDA medio"]
+    data = []
+    for m in mapas:
+        s_ = mapa_stats[m]
+        acs_m = sum(s_["acs"]) / len(s_["acs"]) if s_["acs"] else 0
+        wr_m  = sum(s_["won"]) / len(s_["won"]) * 100 if s_["won"] else 0
+        dda_m = sum(s_["dda"]) / len(s_["dda"]) if s_["dda"] else 0
+        data.append([acs_m, wr_m, dda_m])
+
+    arr = np.array(data, dtype=float)
+    # normalise each column 0–1 for color
+    normed = np.zeros_like(arr)
+    for c in range(arr.shape[1]):
+        col = arr[:, c]
+        mn, mx = col.min(), col.max()
+        normed[:, c] = (col - mn) / (mx - mn) if mx != mn else 0.5
+
+    fig, ax = plt.subplots(figsize=(7, max(3, len(mapas) * 0.65)), facecolor="#0a0b11")
+    ax.set_facecolor("#0f1119")
+    im = ax.imshow(normed, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
+    ax.set_xticks(range(len(metricas)))
+    ax.set_xticklabels(metricas, color="#f5f7fb", fontsize=10)
+    ax.set_yticks(range(len(mapas)))
+    ax.set_yticklabels(mapas, color="#f5f7fb", fontsize=10)
+    for spine in ax.spines.values():
+        spine.set_color("#2a3043")
+    ax.tick_params(colors="#96a3b3")
+    for r_i in range(len(mapas)):
+        for c_i in range(len(metricas)):
+            val = arr[r_i, c_i]
+            txt = f"{val:.0f}" if c_i != 1 else f"{val:.0f}%"
+            ax.text(c_i, r_i, txt, ha="center", va="center", fontsize=9,
+                    color="white", fontweight="bold")
+    ax.set_title("Rendimiento por mapa", color="#f5f7fb", fontsize=12, pad=10)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
+    """Genera pie chart de agentes."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    agentes = [r["agente"] for r in agent_rows if r["agente"] != "Desconocido"]
+    counts  = [r["count"]  for r in agent_rows if r["agente"] != "Desconocido"]
+    if not agentes:
+        return None
+
+    COLORS = ["#4fd1c5","#fc8181","#f6e05e","#68d391","#76e4f7",
+              "#a78bfa","#f687b3","#fbd38d","#9ae6b4","#bee3f8"]
+
+    fig, ax = plt.subplots(figsize=(6, 5), facecolor="#0a0b11")
+    wedges, texts, autotexts = ax.pie(
+        counts, labels=agentes, autopct="%1.0f%%",
+        colors=COLORS[:len(agentes)], startangle=140,
+        textprops={"color": "#f5f7fb", "fontsize": 10},
+        wedgeprops={"linewidth": 1.5, "edgecolor": "#0a0b11"},
+    )
+    for at in autotexts:
+        at.set_fontsize(9)
+        at.set_color("#0a0b11")
+        at.set_fontweight("bold")
+    ax.set_title(titulo, color="#f5f7fb", fontsize=13, fontweight="bold", pad=14)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
+    """Genera gráfica de barras horizontales comparando dos jugadores."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    metricas = ["ACS", "KDA", "ADR", "KAST %", "DDA", "WR %", "HS %"]
+    vals_a = [
+        float(stats_a.get("acs_medio") or 0),
+        round((float(stats_a.get("tk") or 0) + float(stats_a.get("ta") or 0)) / max(float(stats_a.get("td") or 1), 1), 2),
+        float(stats_a.get("adr_medio") or 0),
+        float(stats_a.get("kast_medio") or 0),
+        float(stats_a.get("dda_medio") or 0),
+        float(stats_a.get("winrate") or 0),
+        float(stats_a.get("hs_medio") or 0),
+    ]
+    vals_b = [
+        float(stats_b.get("acs_medio") or 0),
+        round((float(stats_b.get("tk") or 0) + float(stats_b.get("ta") or 0)) / max(float(stats_b.get("td") or 1), 1), 2),
+        float(stats_b.get("adr_medio") or 0),
+        float(stats_b.get("kast_medio") or 0),
+        float(stats_b.get("dda_medio") or 0),
+        float(stats_b.get("winrate") or 0),
+        float(stats_b.get("hs_medio") or 0),
+    ]
+
+    y = np.arange(len(metricas))
+    bar_h = 0.32
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor="#0a0b11")
+    ax.set_facecolor("#0f1119")
+    bars_a = ax.barh(y + bar_h/2, vals_a, bar_h, color="#4fd1c5", label=nombre_a)
+    bars_b = ax.barh(y - bar_h/2, vals_b, bar_h, color="#fc8181", label=nombre_b)
+    ax.set_yticks(y)
+    ax.set_yticklabels(metricas, color="#f5f7fb", fontsize=11)
+    ax.tick_params(axis="x", colors="#96a3b3", labelsize=9)
+    for spine in ax.spines.values():
+        spine.set_color("#2a3043")
+    ax.grid(axis="x", color="#1e2535", linewidth=0.7)
+    ax.legend(facecolor="#0f1119", edgecolor="#2a3043", labelcolor="#f5f7fb", fontsize=10)
+    ax.set_title(f"{nombre_a}  vs  {nombre_b}", color="#f5f7fb", fontsize=13, fontweight="bold", pad=12)
+    for bar in bars_a:
+        w = bar.get_width()
+        ax.text(w + 0.5, bar.get_y() + bar.get_height()/2, f"{w:.1f}", va="center", color="#4fd1c5", fontsize=8)
+    for bar in bars_b:
+        w = bar.get_width()
+        ax.text(w + 0.5, bar.get_y() + bar.get_height()/2, f"{w:.1f}", va="center", color="#fc8181", fontsize=8)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _gen_precision(rows, nombre_jugador):
+    """Genera gráfica de precisión HS% por partida con media móvil."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    hs_data = [(r["fecha"].strftime("%d/%m"), float(r["hs"])) for r in rows if r.get("hs") is not None]
+    if not hs_data:
+        return None
+
+    fechas, vals = zip(*hs_data)
+    indices = list(range(len(vals)))
+    media_movil = np.convolve(vals, np.ones(3)/3, mode="same")
+
+    fig, ax = plt.subplots(figsize=(10, 3.5), facecolor="#0a0b11")
+    ax.set_facecolor("#0f1119")
+    for spine in ax.spines.values():
+        spine.set_color("#2a3043")
+    ax.fill_between(indices, vals, alpha=0.12, color="#f6e05e")
+    ax.plot(indices, vals, color="#f6e05e", linewidth=1.5, marker="o", markersize=4, label="HS% real")
+    ax.plot(indices, media_movil, color="#fc8181", linewidth=2, linestyle="--", label="Media móvil (3)")
+    ax.axhline(sum(vals)/len(vals), color="#888", linewidth=0.9, linestyle=":", label=f"Media global ({sum(vals)/len(vals):.1f}%)")
+    ax.set_xticks(indices)
+    ax.set_xticklabels(fechas, rotation=45, ha="right", fontsize=7, color="#96a3b3")
+    ax.tick_params(axis="y", colors="#96a3b3", labelsize=9)
+    ax.grid(axis="y", color="#1e2535", linewidth=0.7)
+    ax.set_title(f"Precisión (HS%) — {nombre_jugador}", color="#f5f7fb", fontsize=12, fontweight="bold")
+    ax.legend(facecolor="#0f1119", edgecolor="#2a3043", labelcolor="#f5f7fb", fontsize=9)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+# ─────────────────────────────────────────────
+# RACHA: lógica interna
+# ─────────────────────────────────────────────
+
+async def _check_racha(nombre, tag, canal):
+    ultimas = await bot.db.fetch(
+        """
+        SELECT won FROM partidas
+        WHERE jugador_nombre = $1 AND jugador_tag = $2
+        ORDER BY fecha DESC LIMIT 5
+        """,
+        nombre, tag,
+    )
+    if len(ultimas) < 3:
+        return
+    resultados = [r["won"] for r in ultimas]
+    if all(resultados[:3]):
+        await canal.send(
+            f"🔥 **¡{nombre}#{tag} está en racha!** 3 victorias seguidas. Que no se le suba a la cabeza. 🏆"
+        )
+    elif not any(resultados[:3]):
+        await canal.send(
+            f"💀 **{nombre}#{tag} lleva 3 derrotas seguidas.** Alguien que le diga que respire. 🫂"
+        )
+
+
+# ─────────────────────────────────────────────
+# ALERTA DE RANGO: guardamos rango en jugadores
+# ─────────────────────────────────────────────
+
+async def _check_rango(nombre, tag, nuevo_rango, canal):
+    row = await bot.db.fetchrow(
+        "SELECT ultimo_rango FROM jugadores WHERE nombre = $1 AND tag = $2",
+        nombre, tag,
+    )
+    if row is None:
+        return
+    viejo = row["ultimo_rango"]
+    if viejo and viejo != nuevo_rango:
+        if nuevo_rango and viejo:
+            ranks_order = [
+                "Iron 1","Iron 2","Iron 3",
+                "Bronze 1","Bronze 2","Bronze 3",
+                "Silver 1","Silver 2","Silver 3",
+                "Gold 1","Gold 2","Gold 3",
+                "Platinum 1","Platinum 2","Platinum 3",
+                "Diamond 1","Diamond 2","Diamond 3",
+                "Ascendant 1","Ascendant 2","Ascendant 3",
+                "Immortal 1","Immortal 2","Immortal 3",
+                "Radiant",
+            ]
+            vi = ranks_order.index(viejo) if viejo in ranks_order else -1
+            ni = ranks_order.index(nuevo_rango) if nuevo_rango in ranks_order else -1
+            if vi >= 0 and ni >= 0:
+                if ni > vi:
+                    await canal.send(f"📈 **¡{nombre}#{tag} ha subido de rango!** {viejo} → **{nuevo_rango}** 🎉")
+                else:
+                    await canal.send(f"📉 **{nombre}#{tag} ha bajado de rango.** {viejo} → **{nuevo_rango}** 😬")
+    await bot.db.execute(
+        "UPDATE jugadores SET ultimo_rango = $1 WHERE nombre = $2 AND tag = $3",
+        nuevo_rango, nombre, tag,
+    )
+
+
+# ─────────────────────────────────────────────
+# RESUMEN SEMANAL AUTOMÁTICO
+# ─────────────────────────────────────────────
+
+@tasks.loop(hours=1)
+async def resumen_semanal():
+    await bot.wait_until_ready()
+    import datetime
+    now = datetime.datetime.utcnow()
+    if now.weekday() != 0 or now.hour != 8:
+        return
+    try:
+        canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
+    except Exception:
+        return
+
+    server_ids = await bot.db.fetch("SELECT DISTINCT server_id FROM jugadores")
+    for srv in server_ids:
+        sid = srv["server_id"]
+        rows = await bot.db.fetch(
+            """
+            SELECT p.jugador_nombre as nombre, p.jugador_tag as tag,
+                   AVG(p.acs) as acs_medio,
+                   COUNT(*) as partidas,
+                   COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
+                   AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
+                            THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
+                            ELSE p.dda END) as dda_medio
+            FROM partidas p
+            JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+            WHERE j.server_id = $1
+              AND p.modo ILIKE 'Competitive'
+              AND p.fecha >= NOW() - INTERVAL '7 days'
+            GROUP BY p.jugador_nombre, p.jugador_tag
+            ORDER BY acs_medio DESC
+            """,
+            sid,
+        )
+        if not rows:
+            continue
+
+        embed = discord.Embed(
+            title="📅 Resumen semanal del servidor",
+            description="Las stats de la última semana en Competitivo.",
+            color=0xFFD700,
+        )
+        mvp = rows[0]
+        embed.add_field(
+            name=f"👑 MVP de la semana: {mvp['nombre']}#{mvp['tag']}",
+            value=f"ACS: **{round(mvp['acs_medio'],1)}** · WR: **{round(mvp['winrate'],1)}%** · Partidas: **{mvp['partidas']}**",
+            inline=False,
+        )
+        for r in rows[1:]:
+            embed.add_field(
+                name=f"🔹 {r['nombre']}#{r['tag']}",
+                value=f"ACS {round(r['acs_medio'],1)} · WR {round(r['winrate'],1)}% · {r['partidas']} partidas · DDA {round(r['dda_medio'],1) if r['dda_medio'] else '—'}",
+                inline=False,
+            )
+        await canal.send(embed=embed)
+
+
+# ─────────────────────────────────────────────
+# PATCH VIGILANTE: añadir racha + rango check
+# ─────────────────────────────────────────────
+
+# El vigilante ya está definido arriba; aquí extendemos on_ready para arrancar resumen_semanal
+
+_old_on_ready = bot.extra_events.get("on_ready", [])
+
+
+# ─────────────────────────────────────────────
+# NUEVOS COMANDOS v1.0.1
+# ─────────────────────────────────────────────
+
+@bot.tree.command(name="remove", description="Deja de vigilar a un jugador del servidor")
+async def remove(interaction: discord.Interaction, nombre: str, tag: str):
+    server_id = str(interaction.guild_id)
+    deleted = await bot.db.execute(
+        "DELETE FROM jugadores WHERE server_id = $1 AND nombre = $2 AND tag = $3",
+        server_id, nombre, tag,
+    )
+    if deleted == "DELETE 1":
+        await interaction.response.send_message(f"🗑️ **{nombre}#{tag}** eliminado de la vigilancia de este servidor.")
+    else:
+        await interaction.response.send_message(f"⚠️ No encontré a **{nombre}#{tag}** en la lista de este servidor.")
+
+
+@bot.tree.command(name="graficas", description="Muestra gráficas de evolución, precisión y mapas de un jugador")
+@app_commands.choices(modo=MODOS_DISCORD)
+async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo: app_commands.Choice[str] = None):
+    await interaction.response.defer()
+    server_id = str(interaction.guild_id)
+    modo_busqueda = "Competitive"
+
+    rows = await bot.db.fetch(
+        """
+        SELECT p.fecha, p.acs, p.dda, p.won, p.mapa, p.agente,
+               p.hs
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
+        ORDER BY p.fecha ASC
+        LIMIT 40
+        """,
+        server_id, nombre, tag, modo_busqueda,
+    )
+
+    if not rows:
+        await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en ese modo.")
+        return
+
+    archivos = []
+
+    buf_evol = await asyncio.to_thread(_gen_evolucion, rows, f"{nombre}#{tag}")
+    archivos.append(discord.File(fp=buf_evol, filename="evolucion.png"))
+
+    buf_hm = await asyncio.to_thread(_gen_heatmap_mapas, rows)
+    if buf_hm:
+        archivos.append(discord.File(fp=buf_hm, filename="mapas.png"))
+
+    agent_rows = await bot.db.fetch(
+        """
+        SELECT p.agente, COUNT(*) as count
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
+        GROUP BY p.agente ORDER BY count DESC
+        """,
+        server_id, nombre, tag, modo_busqueda,
+    )
+    buf_pie = await asyncio.to_thread(_gen_pie_agentes, agent_rows, f"Agentes — {nombre}#{tag}")
+    if buf_pie:
+        archivos.append(discord.File(fp=buf_pie, filename="agentes.png"))
+
+    if modo_busqueda == "Competitive":
+        buf_prec = await asyncio.to_thread(_gen_precision, rows, f"{nombre}#{tag}")
+        if buf_prec:
+            archivos.append(discord.File(fp=buf_prec, filename="precision.png"))
+
+    embed = discord.Embed(
+        title=f"📊 Gráficas de {nombre}#{tag}",
+        description=f"Últimas {len(rows)} partidas en modo {modo.name if modo else 'Competitivo'}",
+        color=0x4fd1c5,
+    )
+    await interaction.followup.send(embed=embed, files=archivos)
+
+
+@bot.tree.command(name="comparar", description="Compara las stats competitivas de dos jugadores del servidor")
+async def comparar(
+    interaction: discord.Interaction,
+    nombre1: str, tag1: str,
+    nombre2: str, tag2: str,
+):
+    await interaction.response.defer()
+    server_id = str(interaction.guild_id)
+    modo_busqueda = "Competitive"
+
+    async def _get_stats(nom, tg):
+        return await bot.db.fetchrow(
+            """
+            SELECT AVG(p.acs) as acs_medio,
+                   SUM(p.kills) as tk, SUM(p.deaths) as td, SUM(p.assists) as ta,
+                   AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL
+                            THEN p.damage_dealt_total::numeric / p.rounds_played ELSE p.adr END) as adr_medio,
+                   AVG(CASE WHEN p.rounds_played > 0 AND p.kast_rounds IS NOT NULL
+                            THEN (p.kast_rounds::numeric * 100.0) / p.rounds_played ELSE p.kast END) as kast_medio,
+                   AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
+                            THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
+                            ELSE p.dda END) as dda_medio,
+                   AVG(p.hs) as hs_medio,
+                   COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
+                   COUNT(*) as total_matches
+            FROM partidas p
+            JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+            WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
+            """,
+            server_id, nom, tg, modo_busqueda,
+        )
+
+    s1, s2 = await asyncio.gather(_get_stats(nombre1, tag1), _get_stats(nombre2, tag2))
+
+    if not s1 or not s1["total_matches"]:
+        await interaction.followup.send(f"❌ No hay datos para **{nombre1}#{tag1}**.")
+        return
+    if not s2 or not s2["total_matches"]:
+        await interaction.followup.send(f"❌ No hay datos para **{nombre2}#{tag2}**.")
+        return
+
+    buf = await asyncio.to_thread(_gen_barra_comparativa, dict(s1), f"{nombre1}#{tag1}", dict(s2), f"{nombre2}#{tag2}")
+    archivo = discord.File(fp=buf, filename="comparar.png")
+
+    def fmt(v, suf=""):
+        return f"{round(float(v),1)}{suf}" if v is not None else "—"
+
+    kda1 = round((float(s1["tk"] or 0) + float(s1["ta"] or 0)) / max(float(s1["td"] or 1),1), 2)
+    kda2 = round((float(s2["tk"] or 0) + float(s2["ta"] or 0)) / max(float(s2["td"] or 1),1), 2)
+
+    embed = discord.Embed(title=f"⚔️ {nombre1}#{tag1}  vs  {nombre2}#{tag2}", color=0x4fd1c5)
+    embed.set_image(url="attachment://comparar.png")
+    embed.add_field(name=f"📊 {nombre1}#{tag1}",
+        value=f"ACS {fmt(s1['acs_medio'])} · KDA {kda1} · ADR {fmt(s1['adr_medio'])} · KAST {fmt(s1['kast_medio'],'%')} · DDA {fmt(s1['dda_medio'])} · WR {fmt(s1['winrate'],'%')} · HS {fmt(s1['hs_medio'],'%')} · {s1['total_matches']} partidas",
+        inline=False)
+    embed.add_field(name=f"📊 {nombre2}#{tag2}",
+        value=f"ACS {fmt(s2['acs_medio'])} · KDA {kda2} · ADR {fmt(s2['adr_medio'])} · KAST {fmt(s2['kast_medio'],'%')} · DDA {fmt(s2['dda_medio'])} · WR {fmt(s2['winrate'],'%')} · HS {fmt(s2['hs_medio'],'%')} · {s2['total_matches']} partidas",
+        inline=False)
+    await interaction.followup.send(file=archivo, embed=embed)
+
+
+@bot.tree.command(name="temporada", description="Resumen competitivo de la temporada del servidor")
+async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
+    await interaction.response.defer()
+    server_id = str(interaction.guild_id)
+    modo_busqueda = "Competitive"
+    modo_display = modo.name if modo else "Competitivo"
+
+    rows = await bot.db.fetch(
+        """
+        SELECT p.jugador_nombre as nombre, p.jugador_tag as tag,
+               AVG(p.acs) as acs_medio,
+               COUNT(*) as partidas,
+               COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
+               AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
+                        THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
+                        ELSE p.dda END) as dda_medio
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND ($2 = '%' OR LOWER(p.modo) = LOWER($2))
+        GROUP BY p.jugador_nombre, p.jugador_tag
+        ORDER BY acs_medio DESC
+        """,
+        server_id, modo_busqueda,
+    )
+
+    if not rows:
+        await interaction.followup.send(f"❌ Todavía no hay datos de **{modo_display}** en este servidor.")
+        return
+
+    agent_rows_all = await bot.db.fetch(
+        """
+        SELECT p.agente, COUNT(*) as count
+        FROM partidas p
+        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1 AND ($2 = '%' OR LOWER(p.modo) = LOWER($2)) AND p.agente != 'Desconocido'
+        GROUP BY p.agente ORDER BY count DESC LIMIT 8
+        """,
+        server_id, modo_busqueda,
+    )
+
+    buf_pie = await asyncio.to_thread(_gen_pie_agentes, agent_rows_all, f"Agentes más jugados — {modo_display}")
+
+    embed = discord.Embed(
+        title=f"🏆 Temporada — {modo_display}",
+        description="Rankings actuales del servidor.",
+        color=0xFFD700,
+    )
+
+    mvp = rows[0]
+    embed.add_field(
+        name=f"👑 MVP: {mvp['nombre']}#{mvp['tag']}",
+        value=f"ACS **{round(mvp['acs_medio'],1)}** · WR **{round(mvp['winrate'],1)}%** · {mvp['partidas']} partidas",
+        inline=False,
+    )
+    most_games = max(rows, key=lambda r: r["partidas"])
+    best_wr = max((r for r in rows if r["partidas"] >= 3), key=lambda r: float(r["winrate"] or 0), default=None)
+    best_dda = max((r for r in rows if r["dda_medio"] is not None), key=lambda r: float(r["dda_medio"]), default=None)
+
+    embed.add_field(name="🎮 Más partidas", value=f"{most_games['nombre']}#{most_games['tag']} ({most_games['partidas']})", inline=True)
+    if best_wr:
+        embed.add_field(name="🏅 Mejor winrate", value=f"{best_wr['nombre']}#{best_wr['tag']} ({round(float(best_wr['winrate']),1)}%)", inline=True)
+    if best_dda:
+        embed.add_field(name="💥 Mejor DDA", value=f"{best_dda['nombre']}#{best_dda['tag']} ({round(float(best_dda['dda_medio']),1)})", inline=True)
+
+    ranking_txt = ""
+    for i, r in enumerate(rows):
+        med = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
+        ranking_txt += f"{med} **{r['nombre']}#{r['tag']}** — ACS {round(r['acs_medio'],1)} · WR {round(float(r['winrate'] or 0),1)}%\n"
+    embed.add_field(name="📋 Ranking completo", value=ranking_txt or "—", inline=False)
+
+    archivos = []
+    if buf_pie:
+        archivos.append(discord.File(fp=buf_pie, filename="agentes_temporada.png"))
+        embed.set_image(url="attachment://agentes_temporada.png")
+
+    await interaction.followup.send(embed=embed, files=archivos)
+
+
+# ─────────────────────────────────────────────
+# PATCH on_ready: arrancar resumen_semanal
+# ─────────────────────────────────────────────
 
 
 bot.run(TOKEN)
