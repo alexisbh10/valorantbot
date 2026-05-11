@@ -106,17 +106,13 @@ def _calc_tracker_metrics_from_stats(s):
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
     W, H = 1180, 680
-    PAD = 26
+    PAD = 28
 
     TEXT = (244, 247, 252, 255)
-    MUTED = (188, 194, 208, 255)
-    SOFT = (220, 224, 235, 110)
-    LINE = (255, 255, 255, 42)
-    GLASS = (12, 16, 28, 108)
-    GLASS_2 = (16, 22, 36, 132)
-    GLASS_3 = (18, 24, 40, 150)
-    POS = (95, 227, 156, 255)
-    NEG = (241, 113, 122, 255)
+    MUTED = (176, 184, 198, 255)
+    LINE = (255, 255, 255, 34)
+    POS = (92, 224, 152, 255)
+    NEG = (239, 106, 106, 255)
 
     def mix(c1, c2, t):
         return tuple(int(c1[i] * (1 - t) + c2[i] * t) for i in range(3))
@@ -124,12 +120,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     def rounded_box(x1, y1, x2, y2, radius, fill, outline=None, width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
 
-    def glass_box(x1, y1, x2, y2, radius=24, fill=GLASS, outline=LINE, width=1):
-        shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(shadow)
-        sd.rounded_rectangle([x1 + 3, y1 + 10, x2 + 3, y2 + 10], radius=radius, fill=(0, 0, 0, 42))
-        nonlocal_img = Image.alpha_composite(img, shadow)
-        img.paste(nonlocal_img)
+    def glass_box(x1, y1, x2, y2, radius=24, fill=(16, 20, 32, 118), outline=(255, 255, 255, 34), width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
 
     def text(x, y, value, font, fill, anchor=None):
@@ -146,73 +137,62 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    bg_a = mix(acc1, (14, 16, 24), 0.72)
-    bg_b = mix(acc2, (8, 10, 18), 0.84)
+    bg_top = mix(acc1, (18, 20, 30), 0.72)
+    bg_bottom = mix(acc2, (9, 11, 18), 0.84)
     for y in range(H):
         t = y / max(H - 1, 1)
-        c = mix(bg_a, bg_b, t)
+        c = mix(bg_top, bg_bottom, t)
         draw.line([(0, y), (W, y)], fill=(*c, 255), width=1)
 
-    for i in range(12):
-        x = int((W / 11) * i)
+    for i in range(7):
+        alpha = 10 if i % 2 == 0 else 6
+        x = int((W / 6) * i)
         draw.polygon(
-            [(x - 120, H), (x + 40, H), (x - 60, 0), (x - 220, 0)],
-            fill=(255, 255, 255, 10 if i % 2 == 0 else 5)
+            [(x - 140, H), (x + 40, H), (x - 40, 0), (x - 220, 0)],
+            fill=(255, 255, 255, alpha)
         )
 
-    for cx, cy, col, radius, alpha in [
-        (120, 70, acc1, 220, 32),
-        (W - 80, 110, acc2, 260, 24),
-        (W - 120, H - 80, acc1, 220, 20),
-    ]:
-        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        gd.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(*col, alpha))
-        img = Image.alpha_composite(img, glow)
-
-    draw = ImageDraw.Draw(img)
-
     header_h = 122
-    glass_box(PAD, PAD, W - PAD, PAD + header_h, radius=28, fill=GLASS_2, outline=(255, 255, 255, 38))
+    glass_box(PAD, PAD, W - PAD, PAD + header_h, radius=28, fill=(18, 23, 38, 126), outline=(255, 255, 255, 42))
 
     try:
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
             ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((84, 84))
-            img.paste(ri, (PAD + 22, PAD + 19), ri)
+            img.paste(ri, (PAD + 20, PAD + 19), ri)
     except Exception:
         pass
 
-    header_x = PAD + 128
-    text(header_x, PAD + 18, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(38), TEXT)
-    text(header_x, PAD + 62, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(18), MUTED)
-    text(header_x, PAD + 90, f"{modo_display}", _FR(16), SOFT)
-
-    text(W - PAD - 24, PAD + 28, "VALORANT STATS", _FB(17), (*mix((255, 255, 255), acc1, 0.22), 255), anchor="ra")
-    text(W - PAD - 24, PAD + 70, s.get("trend", "Estable"), _FM(16), TEXT, anchor="ra")
+    header_x = PAD + 124
+    text(header_x, PAD + 18, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(36), TEXT)
+    text(header_x, PAD + 60, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(18), MUTED)
+    text(header_x, PAD + 88, f"{modo_display}", _FR(16), (210, 214, 224, 220))
+    text(W - PAD - 22, PAD + 26, "VALORANT STATS", _FB(18), TEXT, anchor="ra")
+    text(W - PAD - 22, PAD + 66, s.get("trend", "Estable"), _FM(16), TEXT, anchor="ra")
 
     card_y = PAD + header_h + 18
-    gap = 12
-    card_w = 220
-    card_h = 92
+    card_gap = 12
+    card_w = 218
+    card_h = 94
 
-    kda_val = round((db_stats.get("tk", 0) + db_stats.get("ta", 0)) / max(db_stats.get("td", 1), 1), 2) if tiene_datos_db else s.get("kda")
+    kda_val = s.get("kda")
     metrics = [
         ("KDA", fmt_num(kda_val, 2), None),
         ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
         ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
-        ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"), POS if float(db_stats.get("winrate") or s.get("winrate") or 0) >= 50 else NEG),
+        ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"),
+         POS if float(db_stats.get("winrate") or s.get("winrate") or 0) >= 50 else NEG),
         ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None),
     ]
 
     for i, (label, value, accent) in enumerate(metrics):
-        x1 = PAD + i * (card_w + gap)
+        x1 = PAD + i * (card_w + card_gap)
         x2 = x1 + card_w
-        glass_box(x1, card_y, x2, card_y + card_h, radius=22, fill=GLASS, outline=(255, 255, 255, 34))
+        glass_box(x1, card_y, x2, card_y + card_h, radius=22, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
         text(x1 + 18, card_y + 14, label, _FM(15), MUTED)
-        text(x1 + 18, card_y + 42, value, _FB(30), accent or TEXT)
-        draw.line((x1 + 18, card_y + 72, x2 - 18, card_y + 72), fill=(255, 255, 255, 28), width=1)
+        text(x1 + 18, card_y + 44, value, _FB(28), accent or TEXT)
+        draw.line((x1 + 18, card_y + 74, x2 - 18, card_y + 74), fill=(255, 255, 255, 24), width=1)
 
     lower_y = card_y + card_h + 18
     left_x = PAD
@@ -220,18 +200,18 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     right_x = left_x + left_w + 18
     right_w = W - PAD - right_x
 
-    glass_box(left_x, lower_y, left_x + left_w, H - PAD, radius=26, fill=GLASS, outline=(255, 255, 255, 34))
-    glass_box(right_x, lower_y, right_x + right_w, lower_y + 170, radius=26, fill=GLASS_2, outline=(255, 255, 255, 34))
-    glass_box(right_x, lower_y + 188, right_x + right_w, H - PAD, radius=26, fill=GLASS_2, outline=(255, 255, 255, 34))
+    glass_box(left_x, lower_y, left_x + left_w, H - PAD, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
+    glass_box(right_x, lower_y, right_x + right_w, lower_y + 164, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
+    glass_box(right_x, lower_y + 182, right_x + right_w, H - PAD, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
 
     text(left_x + 24, lower_y + 18, "Resumen", _FB(24), TEXT)
     played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
     text(left_x + 24, lower_y + 58, f"Partidas analizadas: {played}", _FR(17), MUTED)
 
     pairs = [
-        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db and db_stats.get("kast_medio") is not None else "—"),
+        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db else "—"),
         ("DDA", fmt_num(db_stats.get("dda_medio"), 1) if tiene_datos_db else "—"),
-        ("Main agent", db_stats.get("main_agent") or s.get("agent") or "Desconocido"),
+        ("Main agent", (db_stats.get("main_agent") or s.get("agent") or "Desconocido") if isinstance(db_stats, dict) else (s.get("agent") or "Desconocido")),
         ("Mapa", s.get("mapa", "Desconocido")),
     ]
 
@@ -241,36 +221,38 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         text(left_x + 24, row_y, lab, _FM(16), MUTED)
         text(left_x + 210, row_y - 1, val, _FB(18), TEXT)
         if idx < len(pairs) - 1:
-            draw.line((left_x + 24, row_y + 32, left_x + left_w - 24, row_y + 32), fill=(255, 255, 255, 24), width=1)
+            draw.line((left_x + 24, row_y + 32, left_x + left_w - 24, row_y + 32), fill=(255, 255, 255, 22), width=1)
 
     lm = s.get("last_match", {}) or {}
     text(right_x + 22, lower_y + 16, "Última partida", _FB(24), TEXT)
-    text(right_x + 22, lower_y + 56, f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}", _FB(36), TEXT)
-    text(right_x + 22, lower_y + 100, f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}", _FR(17), MUTED)
+    text(right_x + 22, lower_y + 54, f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}", _FB(34), TEXT)
+    text(right_x + 22, lower_y + 98, f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}", _FR(17), MUTED)
     result_text = "Victoria" if lm.get("won") else "Derrota"
     result_color = POS if lm.get("won") else NEG
-    text(right_x + right_w - 24, lower_y + 60, result_text, _FB(24), result_color, anchor="ra")
+    text(right_x + right_w - 22, lower_y + 58, result_text, _FB(24), result_color, anchor="ra")
 
-    text(right_x + 22, lower_y + 206, "Agentes más usados", _FB(24), TEXT)
-    badge_x = right_x + 22
-    badge_y = lower_y + 252
+    text(right_x + 22, lower_y + 198, "Lineups / agentes", _FB(24), TEXT)
+
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
+    agents = [a for a in agents if a and a != "Desconocido"]
     if not agents:
-        agents = [s.get("agent", "Desconocido")]
+        fallback = s.get("agent", "Desconocido")
+        agents = [fallback] if fallback else ["Desconocido"]
+
+    badge_x = right_x + 22
+    badge_y = lower_y + 246
 
     for ag in agents:
-        w = max(108, 26 + int(len(ag) * 10.5))
-        rounded_box(
-            badge_x, badge_y, badge_x + w, badge_y + 40, 18,
-            fill=(*mix(acc1, (255, 255, 255), 0.55), 88),
-            outline=(255, 255, 255, 70),
-            width=1
-        )
-        text(badge_x + 14, badge_y + 9, ag, _FM(16), TEXT)
+        w = max(118, 30 + int(len(ag) * 11))
+        fill_col = (*mix(acc1, (240, 242, 248), 0.58), 92)
+        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 42, 18, fill=fill_col, outline=(255, 255, 255, 72), width=1)
+        text(badge_x + 14, badge_y + 10, ag, _FM(16), (250, 252, 255, 255))
         badge_x += w + 10
         if badge_x > right_x + right_w - 150:
             badge_x = right_x + 22
             badge_y += 50
+
+    text(right_x + 22, H - PAD - 34, "Los setups completos van también en el embed", _FR(14), (210, 214, 224, 210))
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
