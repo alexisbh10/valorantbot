@@ -204,7 +204,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         pass
 
     metrics = [
-        ("KDA", fmt_num(s.get("kda"), 2), None),
+        ("KDA", fmt_num(db_stats.get("kda") if tiene_datos_db else s.get("kda"), 2), None),
         ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
         ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
         ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"),
@@ -489,11 +489,11 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
             p.damage_received_total, p.kast_rounds, p.hs, p.fecha
         FROM partidas p
         JOIN jugadores j
-        ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+          ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
         WHERE j.server_id = $1
-        AND p.jugador_nombre = $2
-        AND p.jugador_tag = $3
-        AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
+          AND p.jugador_nombre = $2
+          AND p.jugador_tag = $3
+          AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
         ORDER BY p.fecha DESC
         LIMIT 120
         """,
@@ -505,10 +505,15 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en **{modo_display}**.")
         return
 
+    tk = sum((r["kills"] or 0) for r in filtered_rows)
+    td = sum((r["deaths"] or 0) for r in filtered_rows)
+    ta = sum((r["assists"] or 0) for r in filtered_rows)
+
     db_stats = {
-        "tk": sum((r["kills"] or 0) for r in filtered_rows),
-        "td": sum((r["deaths"] or 0) for r in filtered_rows),
-        "ta": sum((r["assists"] or 0) for r in filtered_rows),
+        "tk": tk,
+        "td": td,
+        "ta": ta,
+        "kda": round((tk + ta) / max(td, 1), 2),
         "acs_medio": round(sum(float(r["acs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
         "adr_medio": round(sum(float(r["adr"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
         "dda_medio": round(sum(float(r["dda"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
@@ -530,6 +535,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     latest = filtered_rows[0]
     s["mapa"] = latest["mapa"] or s.get("mapa")
     s["modo"] = latest["modo"] or s.get("modo")
+    s["kda"] = db_stats["kda"]
     s["last_match"] = {
         "id": latest["match_id"],
         "kills": latest["kills"] or 0,
