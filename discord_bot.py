@@ -45,6 +45,7 @@ def _load_fonts():
 
 
 _FB, _FR = _load_fonts()
+_FM = _FR
 
 
 def _rank_palette(rank):
@@ -285,8 +286,9 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
 
 @bot.event
 async def on_ready():
-    bot.db = await asyncpg.create_pool(DATABASE_URL)
-    print("✅ Bot conectado a PostgreSQL")
+    if not hasattr(bot, "db") or bot.db is None:
+        bot.db = await asyncpg.create_pool(DATABASE_URL)
+        print("✅ Bot conectado a PostgreSQL")
     print("🛠️ Verificando estructura de la base de datos...")
     await bot.db.execute("""
         CREATE TABLE IF NOT EXISTS jugadores (
@@ -331,7 +333,17 @@ async def on_ready():
     await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS hs NUMERIC(5,2);")
     print("✅ Base de datos lista y estructurada.")
     print(f"✅ Bot listo en Discord: {bot.user}")
-    await bot.tree.sync()
+    try:
+        guild_id = os.getenv("DISCORD_GUILD_ID")
+        if guild_id:
+            guild_obj = discord.Object(id=int(guild_id))
+            synced = await bot.tree.sync(guild=guild_obj)
+            print(f"✅ Slash commands sincronizados en guild {guild_id}: {len(synced)}")
+        else:
+            synced = await bot.tree.sync()
+            print(f"✅ Slash commands sincronizados globalmente: {len(synced)}")
+    except Exception as e:
+        print(f"❌ Error sincronizando slash commands: {e}")
     if not vigilante_partidas.is_running():
         vigilante_partidas.start()
     if not resumen_semanal.is_running():
@@ -455,8 +467,8 @@ async def fetch_stats(nombre, tag, region="eu"):
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 @app_commands.choices(modo=MODOS_DISCORD)
 async def stats(interaction: discord.Interaction, nombre: str, tag: str, region: str = "eu", modo: app_commands.Choice[str] = None):
-    await interaction.response.defer()
-    modo_busqueda = "Competitive"
+    await interaction.response.defer(thinking=True)
+    modo_busqueda = modo.value if modo else "Competitive"
     modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%":
         modo_display = "Todos los modos"
@@ -505,9 +517,14 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     )
 
     top_agents_db = [r["agente"] for r in agent_rows]
-    tiene_datos_db = db_stats and db_stats["total_matches"] > 0
-    buf = await asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats or {}, top_agents_db)
-    archivo = discord.File(fp=buf, filename="stats.png")
+    tiene_datos_db = bool(db_stats and db_stats["total_matches"] and db_stats["total_matches"] > 0)
+    try:
+        buf = await asyncio.wait_for(asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats or {}, top_agents_db), timeout=20)
+        archivo = discord.File(fp=buf, filename="stats.png")
+    except Exception as e:
+        logging.exception("Error generando tarjeta /stats")
+        await interaction.followup.send(f"❌ Error generando la tarjeta de stats: {e}")
+        return
 
     embed = discord.Embed(color=0x9333EA if s.get("smurf") else 0xFF4655)
     embed.set_image(url="attachment://stats.png")
@@ -540,7 +557,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 @app_commands.choices(modo=MODOS_DISCORD)
 async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
     server_id = str(interaction.guild_id)
-    modo_busqueda = "Competitive"
+    modo_busqueda = modo.value if modo else "Competitive"
     modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%":
         modo_display = "Todos los modos"
@@ -1209,3 +1226,16 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
 
 
 bot.run(TOKEN)
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    logging.exception("Slash command error", exc_info=error)
+    msg = f"❌ Error ejecutando el comando: {error}"
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+    except Exception:
+        pass
