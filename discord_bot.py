@@ -165,8 +165,20 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     text(header_x, 72, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(20), MUTED)
     text(header_x, 102, modo_display, _FR(16), MUTED)
 
-    text(W - PAD, 34, "VALORANT STATS", _FB(18), TEXT, anchor="ra")
-    text(W - PAD, 76, s.get("trend", "Estable"), _FM(16), MUTED, anchor="ra")
+    try:
+        profile_url = (
+            s.get("profile_image")
+            or s.get("player_card")
+            or s.get("card")
+            or s.get("avatar")
+            or ""
+        )
+        if profile_url:
+            pf_data = requests.get(profile_url, timeout=6)
+            pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA").resize((170, 96))
+            img.paste(pf, (W - PAD - 170, PAD + 24), pf)
+    except Exception:
+        pass
 
     metrics = [
         ("KDA", fmt_num(s.get("kda"), 2), None),
@@ -240,12 +252,11 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
             badge_x = right_x
             badge_y += 52
 
-        fill_col = (*mix(acc1, (255, 255, 255), 0.45), 82)
+        fill_col = (*mix(acc1, (255, 255, 255), 0.28), 52)
         soft_badge(badge_x, badge_y, badge_x + w, badge_y + 40, fill_col, outline=(255, 255, 255, 56))
         text(badge_x + 14, badge_y + 9, ag, _FM(16), TEXT)
         badge_x += w + 10
 
-    text(right_x, H - 46, "Los setups completos siguen también en el embed", _FR(14), (220, 224, 232, 210))
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
