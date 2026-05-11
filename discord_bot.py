@@ -344,7 +344,6 @@ async def on_ready():
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild_obj = discord.Object(id=int(guild_id))
-            bot.tree.copy_global_to(guild=guild_obj)
             synced = await bot.tree.sync(guild=guild_obj)
             print(f"✅ Slash commands sincronizados en guild {guild_id}: {len(synced)}")
         else:
