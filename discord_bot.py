@@ -106,13 +106,13 @@ def _calc_tracker_metrics_from_stats(s):
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
     W, H = 1180, 680
-    PAD = 28
+    PAD = 34
 
-    TEXT = (244, 247, 252, 255)
-    MUTED = (176, 184, 198, 255)
-    LINE = (255, 255, 255, 34)
-    POS = (92, 224, 152, 255)
-    NEG = (239, 106, 106, 255)
+    TEXT = (244, 247, 252)
+    MUTED = (154, 163, 178)
+    LINE = (37, 43, 60)
+    POS = (92, 224, 152)
+    NEG = (239, 106, 106)
 
     def mix(c1, c2, t):
         return tuple(int(c1[i] * (1 - t) + c2[i] * t) for i in range(3))
@@ -120,8 +120,8 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     def rounded_box(x1, y1, x2, y2, radius, fill, outline=None, width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
 
-    def glass_box(x1, y1, x2, y2, radius=24, fill=(16, 20, 32, 118), outline=(255, 255, 255, 34), width=1):
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
+    def glass_box(x1, y1, x2, y2, radius=24, fill=(16, 20, 32, 108), outline=(255, 255, 255, 34), width=1):
+        rounded_box(x1, y1, x2, y2, radius, fill, outline, width)
 
     def text(x, y, value, font, fill, anchor=None):
         draw.text((x, y), str(value), font=font, fill=fill, anchor=anchor)
@@ -137,48 +137,48 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    bg_top = mix(acc1, (18, 20, 30), 0.72)
-    bg_bottom = mix(acc2, (9, 11, 18), 0.84)
+    top_bg = mix(acc1, (12, 14, 22), 0.68)
+    bottom_bg = mix(acc2, (5, 7, 12), 0.82)
+
     for y in range(H):
         t = y / max(H - 1, 1)
-        c = mix(bg_top, bg_bottom, t)
+        c = mix(top_bg, bottom_bg, t)
         draw.line([(0, y), (W, y)], fill=(*c, 255), width=1)
 
-    for i in range(7):
-        alpha = 10 if i % 2 == 0 else 6
-        x = int((W / 6) * i)
-        draw.polygon(
-            [(x - 140, H), (x + 40, H), (x - 40, 0), (x - 220, 0)],
-            fill=(255, 255, 255, alpha)
-        )
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse((-180, -140, 320, 280), fill=(*acc1, 34))
+    gd.ellipse((W - 360, H - 300, W + 120, H + 120), fill=(*acc2, 28))
+    img = Image.alpha_composite(img, glow)
+    draw = ImageDraw.Draw(img)
 
-    header_h = 122
-    glass_box(PAD, PAD, W - PAD, PAD + header_h, radius=28, fill=(18, 23, 38, 126), outline=(255, 255, 255, 42))
+    header_h = 118
+    glass_box(PAD, PAD, W - PAD, PAD + header_h, radius=28, fill=(15, 19, 31, 112), outline=(255, 255, 255, 36))
 
     try:
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
-            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((84, 84))
-            img.paste(ri, (PAD + 20, PAD + 19), ri)
+            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((82, 82))
+            img.paste(ri, (PAD + 20, PAD + 18), ri)
     except Exception:
         pass
 
-    header_x = PAD + 124
+    header_x = PAD + 120
     text(header_x, PAD + 18, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(36), TEXT)
-    text(header_x, PAD + 60, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(18), MUTED)
-    text(header_x, PAD + 88, f"{modo_display}", _FR(16), (210, 214, 224, 220))
-    text(W - PAD - 22, PAD + 26, "VALORANT STATS", _FB(18), TEXT, anchor="ra")
+    text(header_x, PAD + 58, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(18), MUTED)
+    text(header_x, PAD + 86, f"{modo_display}", _FR(16), (212, 217, 228, 220))
+
+    text(W - PAD - 22, PAD + 24, "VALORANT STATS", _FB(18), TEXT, anchor="ra")
     text(W - PAD - 22, PAD + 66, s.get("trend", "Estable"), _FM(16), TEXT, anchor="ra")
 
     card_y = PAD + header_h + 18
-    card_gap = 12
+    gap = 12
     card_w = 218
-    card_h = 94
+    card_h = 92
 
-    kda_val = s.get("kda")
     metrics = [
-        ("KDA", fmt_num(kda_val, 2), None),
+        ("KDA", fmt_num(s.get("kda"), 2), None),
         ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
         ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
         ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"),
@@ -187,22 +187,22 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     ]
 
     for i, (label, value, accent) in enumerate(metrics):
-        x1 = PAD + i * (card_w + card_gap)
+        x1 = PAD + i * (card_w + gap)
         x2 = x1 + card_w
-        glass_box(x1, card_y, x2, card_y + card_h, radius=22, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
+        glass_box(x1, card_y, x2, card_y + card_h, radius=22, fill=(16, 20, 32, 108), outline=(255, 255, 255, 32))
         text(x1 + 18, card_y + 14, label, _FM(15), MUTED)
-        text(x1 + 18, card_y + 44, value, _FB(28), accent or TEXT)
-        draw.line((x1 + 18, card_y + 74, x2 - 18, card_y + 74), fill=(255, 255, 255, 24), width=1)
+        text(x1 + 18, card_y + 42, value, _FB(28), accent or TEXT)
+        draw.line((x1 + 18, card_y + 72, x2 - 18, card_y + 72), fill=(255, 255, 255, 22), width=1)
 
     lower_y = card_y + card_h + 18
-    left_x = PAD
     left_w = 530
+    left_x = PAD
     right_x = left_x + left_w + 18
     right_w = W - PAD - right_x
 
-    glass_box(left_x, lower_y, left_x + left_w, H - PAD, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
-    glass_box(right_x, lower_y, right_x + right_w, lower_y + 164, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
-    glass_box(right_x, lower_y + 182, right_x + right_w, H - PAD, radius=26, fill=(15, 19, 31, 112), outline=(255, 255, 255, 34))
+    glass_box(left_x, lower_y, left_x + left_w, H - PAD, radius=26, fill=(16, 20, 32, 108), outline=(255, 255, 255, 32))
+    glass_box(right_x, lower_y, right_x + right_w, lower_y + 164, radius=26, fill=(16, 20, 32, 108), outline=(255, 255, 255, 32))
+    glass_box(right_x, lower_y + 182, right_x + right_w, H - PAD, radius=26, fill=(16, 20, 32, 108), outline=(255, 255, 255, 32))
 
     text(left_x + 24, lower_y + 18, "Resumen", _FB(24), TEXT)
     played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
@@ -234,30 +234,25 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     text(right_x + 22, lower_y + 198, "Lineups / agentes", _FB(24), TEXT)
 
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
-    agents = [a for a in agents if a and a != "Desconocido"]
     if not agents:
-        fallback = s.get("agent", "Desconocido")
-        agents = [fallback] if fallback else ["Desconocido"]
+        agents = [s.get("agent", "Desconocido")]
 
     badge_x = right_x + 22
     badge_y = lower_y + 246
-
     for ag in agents:
         w = max(118, 30 + int(len(ag) * 11))
-        fill_col = (*mix(acc1, (240, 242, 248), 0.58), 92)
-        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 42, 18, fill=fill_col, outline=(255, 255, 255, 72), width=1)
+        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 42, 18, fill=(*mix(acc1, (240, 242, 248), 0.58), 92), outline=(255, 255, 255, 72))
         text(badge_x + 14, badge_y + 10, ag, _FM(16), (250, 252, 255, 255))
         badge_x += w + 10
         if badge_x > right_x + right_w - 150:
             badge_x = right_x + 22
             badge_y += 50
 
-    text(right_x + 22, H - PAD - 34, "Los setups completos van también en el embed", _FR(14), (210, 214, 224, 210))
-
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 @bot.event
 async def on_ready():
