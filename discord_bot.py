@@ -31,37 +31,16 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 CANAL_ALERTAS_ID = 1496883989867139102
 
 
-def _download_font(url: str):
-    r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-    if r.status_code != 200:
-        raise RuntimeError(f"Font download failed: {r.status_code}")
-    content_type = (r.headers.get("content-type") or "").lower()
-    if "text/html" in content_type:
-        raise RuntimeError("Font URL returned HTML instead of TTF")
-    if len(r.content) < 10_000:
-        raise RuntimeError("Font file too small or invalid")
-    return io.BytesIO(r.content)
-
 def _load_fonts():
     try:
-        regular = _download_font("https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-Regular.ttf")
-        medium = _download_font("https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-Medium.ttf")
-        semibold = _download_font("https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/Inter-SemiBold.ttf")
         return (
-            lambda s: ImageFont.truetype(semibold, s),
-            lambda s: ImageFont.truetype(regular, s),
-            lambda s: ImageFont.truetype(medium, s),
+            lambda s: ImageFont.truetype("assets/fonts/Inter-SemiBold.ttf", s),
+            lambda s: ImageFont.truetype("assets/fonts/Inter-Regular.ttf", s),
+            lambda s: ImageFont.truetype("assets/fonts/Inter-Medium.ttf", s),
         )
     except Exception:
-        try:
-            return (
-                lambda s: ImageFont.truetype("DejaVuSans-Bold.ttf", s),
-                lambda s: ImageFont.truetype("DejaVuSans.ttf", s),
-                lambda s: ImageFont.truetype("DejaVuSans.ttf", s),
-            )
-        except Exception:
-            f = ImageFont.load_default()
-            return lambda s: f, lambda s: f, lambda s: f
+        f = ImageFont.load_default()
+        return lambda s: f, lambda s: f, lambda s: f
 
 _FB, _FR, _FM = _load_fonts()
 
