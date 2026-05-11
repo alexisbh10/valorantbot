@@ -1018,7 +1018,7 @@ async def resumen_semanal():
 
         embed = discord.Embed(
             title="📅 Resumen semanal del servidor",
-            description="Las stats de la última semana en Competitivo.",
+            description="Stats de la última semana en Competitivo.",
             color=0xFFD700,
         )
         mvp = rows[0]
