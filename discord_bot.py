@@ -108,18 +108,19 @@ def _calc_tracker_metrics_from_stats(s):
 
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
-    W, H = 1100, 620
+    W, H = 1180, 680
     PAD = 34
-    BG = (9, 11, 17)
+    BG = (8, 10, 16)
     PANEL = (15, 18, 28)
-    PANEL_SOFT = (21, 25, 38)
-    PANEL_ELEV = (27, 32, 47)
-    TEXT = (245, 247, 251)
-    MUTED = (150, 159, 179)
-    FAINT = (104, 112, 132)
-    LINE = (42, 48, 67)
-    POS = (79, 209, 138)
-    NEG = (236, 96, 96)
+    PANEL_2 = (20, 24, 36)
+    TEXT = (244, 247, 252)
+    MUTED = (154, 163, 178)
+    LINE = (37, 43, 60)
+    POS = (92, 224, 152)
+    NEG = (239, 106, 106)
+
+    def mix(c1, c2, t):
+        return tuple(int(c1[i] * (1 - t) + c2[i] * t) for i in range(3))
 
     def rounded_box(x1, y1, x2, y2, radius, fill, outline=None, width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
@@ -138,151 +139,129 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     img = Image.new("RGBA", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    for i in range(H):
-        t = i / H
-        c = tuple(int(BG[j] * (1 - t) + (14, 18, 28)[j] * t) for j in range(3))
-        draw.line([(0, i), (W, i)], fill=c, width=1)
+    # rank-based vertical gradient
+    top_tint = mix(acc1, BG, 0.55)
+    bottom_tint = mix(acc2, BG, 0.75)
+    for y in range(H):
+        t = y / max(H - 1, 1)
+        c = mix(top_tint, bottom_tint, t)
+        draw.line([(0, y), (W, y)], fill=c, width=1)
 
-    for r in range(300, 0, -10):
-        a = int(24 * (1 - r / 300))
-        c = tuple(min(255, int(acc1[j] * a / 255 + BG[j])) for j in range(3))
-        draw.ellipse((-70, -50, r + 10, r + 30), fill=c)
-    for r in range(250, 0, -10):
-        a = int(16 * (1 - r / 250))
-        c = tuple(min(255, int(acc2[j] * a / 255 + BG[j])) for j in range(3))
-        draw.ellipse((W - r - 40, H - r - 130, W + 80, H + 10), fill=c)
+    # subtle glows
+    for r in range(360, 0, -10):
+        alpha = int(36 * (1 - r / 360))
+        c = (*acc1, alpha)
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.ellipse((-(r//3), -80, r, r+40), fill=c)
+        img = Image.alpha_composite(img, glow)
+    for r in range(320, 0, -10):
+        alpha = int(22 * (1 - r / 320))
+        c = (*acc2, alpha)
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.ellipse((W-r+40, H-r-100, W+120, H+40), fill=c)
+        img = Image.alpha_composite(img, glow)
+    draw = ImageDraw.Draw(img)
 
-    rounded_box(PAD, PAD, W - PAD, H - PAD, 28, PANEL, outline=(255, 255, 255, 16))
-    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 146, 28, PANEL_SOFT)
+    rounded_box(PAD, PAD, W - PAD, H - PAD, 30, PANEL, outline=(255, 255, 255, 24))
+    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 158, 30, PANEL_2)
 
+    # header
     try:
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
             ri_data = requests.get(icon_url, timeout=6)
-            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA")
-            ri.thumbnail((88, 88), Image.LANCZOS)
-            icon_layer = Image.new("RGBA", (92, 92), (0, 0, 0, 0))
-            ix = (92 - ri.width) // 2
-            iy = (92 - ri.height) // 2
-            icon_layer.paste(ri, (ix, iy), ri)
-            rounded_box(PAD + 18, PAD + 20, PAD + 110, PAD + 112, 24, PANEL_ELEV, outline=(255, 255, 255, 20))
-            img.paste(icon_layer, (PAD + 18, PAD + 20), icon_layer)
+            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((92, 92))
+            img.paste(ri, (PAD + 24, PAD + 28), ri)
     except Exception:
         pass
 
-    header_x = PAD + 132
-    text(header_x, PAD + 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(44), TEXT)
-    text(header_x, PAD + 80, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')} · {modo_display}", _FR(20), MUTED)
+    header_x = PAD + 138
+    text(header_x, PAD + 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(42), TEXT)
+    text(header_x, PAD + 78, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(22), MUTED)
+    text(header_x, PAD + 110, f"Modo: {modo_display}", _FR(18), mix(MUTED, TEXT, 0.22))
+    text(W - PAD - 26, PAD + 36, "VALORANT STATS", _FB(20), mix(TEXT, acc1, 0.3), anchor="ra")
+    text(W - PAD - 26, PAD + 78, s.get("trend", "Estable ➖"), _FM(20), TEXT, anchor="ra")
 
-    try:
-        card_url = s.get("card", "")
-        if card_url:
-            card_raw = Image.open(io.BytesIO(requests.get(card_url, timeout=6).content)).convert("RGBA")
-            cw, ch = 132, 132
-            card = card_raw.copy()
-            card.thumbnail((cw, ch), Image.LANCZOS)
-            layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-            px = (cw - card.width) // 2
-            py = (ch - card.height) // 2
-            layer.paste(card, (px, py), card)
-            mask = Image.new("L", (cw, ch), 0)
-            ImageDraw.Draw(mask).rounded_rectangle([0, 0, cw, ch], radius=24, fill=255)
-            border = Image.new("RGBA", (cw + 8, ch + 8), (0, 0, 0, 0))
-            ImageDraw.Draw(border).rounded_rectangle([0, 0, cw + 7, ch + 7], radius=26, fill=PANEL_ELEV, outline=(255, 255, 255, 20), width=1)
-            layer.putalpha(mask)
-            img.paste(border, (W - PAD - cw - 28, PAD + 14), border)
-            img.paste(layer, (W - PAD - cw - 24, PAD + 18), layer)
-    except Exception:
-        pass
-
-    kda_show = None
-    acs_show = None
-    if tiene_datos_db and db_stats:
-        tk = db_stats.get("tk") or 0
-        td = db_stats.get("td") or 0
-        ta = db_stats.get("ta") or 0
-        kda_show = round((tk + ta) / max(td, 1), 2) if db_stats.get("total_matches") else None
-        acs_show = db_stats.get("acs_medio")
-    adr_show = db_stats.get("adr_medio") if (tiene_datos_db and db_stats) else s.get("adr")
-    kast_show = db_stats.get("kast_medio") if (tiene_datos_db and db_stats) else s.get("kast")
-    dda_show = db_stats.get("dda_medio") if (tiene_datos_db and db_stats) else (s.get("dda") or s.get("damage_delta"))
-
-    cards = [
-        ("KDA", fmt_num(kda_show, 2) if kda_show is not None else str(s.get("kda", "0"))),
-        ("ACS", fmt_num(acs_show) if acs_show is not None else str(s.get("acs", "0"))),
-        ("ADR", fmt_num(adr_show)),
-        ("HS%", f"{s.get('hs', 0)}%"),
-        ("KAST", fmt_num(kast_show, suffix="%")),
+    # KPI cards
+    card_y = PAD + 182
+    left = PAD + 24
+    card_w = 206
+    gap = 16
+    metrics = [
+        ("KDA", fmt_num(s.get("kda"), 2), None),
+        ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
+        ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
+        ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"), POS if float(db_stats.get("winrate") or s.get("winrate") or 0) >= 50 else NEG),
+        ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None),
     ]
-
-    top_y = 168
-    gap = 14
-    card_w = int((W - PAD * 2 - gap * 4) / 5)
-    for i, (label, value) in enumerate(cards):
-        x1 = PAD + i * (card_w + gap)
+    for i, (label, value, accent) in enumerate(metrics):
+        x1 = left + i * (card_w + gap)
         x2 = x1 + card_w
-        rounded_box(x1, top_y, x2, top_y + 112, 22, PANEL_SOFT, outline=LINE)
-        rounded_box(x1 + 12, top_y + 12, x1 + 58, top_y + 38, 13, PANEL_ELEV)
-        text(x1 + 35, top_y + 26, label, _FM(14), MUTED, anchor="mm")
-        text(x1 + 20, top_y + 56, value, _FB(32), TEXT)
-        draw.line([(x1 + 18, top_y + 92), (x2 - 18, top_y + 92)], fill=(255, 255, 255, 10), width=1)
-        text(x1 + 20, top_y + 97, "Actual", _FR(13), FAINT)
+        rounded_box(x1, card_y, x2, card_y + 110, 22, (18, 22, 34), outline=(255,255,255,18))
+        text(x1 + 18, card_y + 18, label, _FM(18), MUTED)
+        text(x1 + 18, card_y + 48, value, _FB(34), accent or TEXT)
+        draw.line((x1 + 18, card_y + 88, x2 - 18, card_y + 88), fill=mix(acc1, LINE, 0.7), width=2)
 
-    mid_y = 300
+    # lower panels
+    lower_y = card_y + 136
     left_w = 520
-    rounded_box(PAD, mid_y, PAD + left_w, H - PAD, 24, PANEL_SOFT, outline=LINE)
-    rounded_box(PAD + left_w + 18, mid_y, W - PAD, H - PAD, 24, PANEL_SOFT, outline=LINE)
+    mid_x = PAD + 24 + left_w + 18
+    right_w = W - PAD - 24 - mid_x
 
-    text(PAD + 24, mid_y + 24, "Resumen de partidas", _FB(20), TEXT)
-    text(PAD + 24, mid_y + 52, "Tu base manda cuando ya hay histórico guardado.", _FR(15), FAINT)
+    rounded_box(PAD + 24, lower_y, PAD + 24 + left_w, H - PAD - 24, 24, (17, 21, 31), outline=(255,255,255,18))
+    rounded_box(mid_x, lower_y, W - PAD - 24, lower_y + 164, 24, (17, 21, 31), outline=(255,255,255,18))
+    rounded_box(mid_x, lower_y + 182, W - PAD - 24, H - PAD - 24, 24, (17, 21, 31), outline=(255,255,255,18))
 
-    delta_color = POS if (_safe_float(dda_show) >= 0) else NEG
-    db_rows = [
-        ("DDA / Ronda", fmt_num(dda_show), delta_color),
-        ("Winrate", fmt_num(db_stats.get("winrate") if tiene_datos_db else None, suffix="%"), TEXT),
-        ("Partidas", str(db_stats.get("total_matches")) if (tiene_datos_db and db_stats and db_stats.get("total_matches") is not None) else "—", TEXT),
-        ("Tendencia", str(db_stats.get("trend", "—")) if (tiene_datos_db and db_stats and db_stats.get("trend") is not None) else str(s.get("trend", "—")), TEXT),
+    # season/db summary
+    text(PAD + 46, lower_y + 22, "Resumen competitivo", _FB(24), TEXT)
+    played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
+    text(PAD + 46, lower_y + 62, f"Partidas analizadas: {played}", _FR(18), MUTED)
+    y0 = lower_y + 112
+    pairs = [
+        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db else "—"),
+        ("DDA", fmt_num(db_stats.get("dda_medio"), 1) if tiene_datos_db else "—"),
+        ("Main agent", (db_stats.get("main_agent") or s.get("agent") or "Desconocido") if isinstance(db_stats, dict) else (s.get("agent") or "Desconocido")),
+        ("Mapa actual", s.get("mapa", "Desconocido")),
     ]
-    row_y = mid_y + 98
-    for idx, (label, value, color) in enumerate(db_rows):
-        y1 = row_y + idx * 50
-        rounded_box(PAD + 20, y1 - 10, PAD + left_w - 20, y1 + 28, 14, PANEL_ELEV if idx == 0 else PANEL, outline=(255,255,255,10))
-        text(PAD + 38, y1, label, _FM(15), MUTED)
-        text(PAD + left_w - 34, y1 - 1, value, _FB(23), color, anchor="ra")
+    for idx, (lab, val) in enumerate(pairs):
+        row_y = y0 + idx * 54
+        text(PAD + 46, row_y, lab, _FM(17), MUTED)
+        text(PAD + 220, row_y - 2, val, _FB(19), TEXT)
+        if idx < len(pairs) - 1:
+            draw.line((PAD + 46, row_y + 34, PAD + 24 + left_w - 24, row_y + 34), fill=LINE, width=1)
 
-    rx = PAD + left_w + 18
-    text(rx + 24, mid_y + 24, "Última partida", _FB(20), TEXT)
-    text(rx + 24, mid_y + 52, "Lectura rápida del último match detectado.", _FR(15), FAINT)
+    # last match
     lm = s.get("last_match", {}) or {}
-    won = lm.get("won")
-    result_txt = "Victoria" if won else "Derrota"
-    result_col = POS if won else NEG
-    rounded_box(rx + 24, mid_y + 88, rx + 168, mid_y + 126, 16, PANEL_ELEV)
-    text(rx + 96, mid_y + 107, result_txt, _FM(20), result_col, anchor="mm")
-    text(rx + 24, mid_y + 154, f"{lm.get('agente', '?')} · {lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)} · ACS {lm.get('acs', 0)}", _FM(18), TEXT)
-    text(rx + 24, mid_y + 188, f"ADR {fmt_num(lm.get('adr'))} · KAST {fmt_num(lm.get('kast'), suffix='%')} · DDA {fmt_num(lm.get('dda'))}", _FR(16), MUTED)
-    text(rx + 24, mid_y + 220, f"Mapa: {s.get('mapa', '?')} · Modo: {s.get('modo', '?')}", _FR(16), MUTED)
+    text(mid_x + 22, lower_y + 18, "Última partida", _FB(24), TEXT)
+    scoreline = f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}"
+    text(mid_x + 22, lower_y + 58, scoreline, _FB(34), TEXT)
+    text(mid_x + 22, lower_y + 102, f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}", _FR(18), MUTED)
+    result_text = "Victoria" if lm.get("won") else "Derrota"
+    result_color = POS if lm.get("won") else NEG
+    text(W - PAD - 48, lower_y + 60, result_text, _FB(26), result_color, anchor="ra")
 
-    text(rx + 24, mid_y + 266, "Agentes más jugados", _FM(15), FAINT)
-    agents = [a for a in top_agents_db if a != "Desconocido"][:5]
-    badge_y = mid_y + 294
-    cur_x = rx + 24
-    for agent in agents:
-        tw = draw.textbbox((0, 0), agent, font=_FM(15))[2]
-        bw = tw + 30
-        rounded_box(cur_x, badge_y, cur_x + bw, badge_y + 34, 17, PANEL_ELEV, outline=(255, 255, 255, 16))
-        text(cur_x + 15, badge_y + 8, agent, _FM(15), TEXT)
-        cur_x += bw + 10
-
-    mask_img = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask_img).rounded_rectangle([0, 0, W, H], radius=30, fill=255)
-    img.putalpha(mask_img)
+    # agents badges
+    text(mid_x + 22, lower_y + 204, "Agentes más usados", _FB(24), TEXT)
+    badge_x = mid_x + 22
+    badge_y = lower_y + 250
+    agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
+    if not agents:
+        agents = [s.get("agent", "Desconocido")]
+    for ag in agents:
+        w = max(120, 28 + int(len(ag) * 11.5))
+        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 44, 18, mix(acc1, PANEL, 0.18), outline=(255,255,255,20))
+        text(badge_x + 16, badge_y + 11, ag, _FM(18), TEXT)
+        badge_x += w + 12
+        if badge_x > W - PAD - 180:
+            badge_x = mid_x + 22
+            badge_y += 56
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
-
 
 @bot.event
 async def on_ready():
@@ -1007,6 +986,11 @@ _old_on_ready = bot.extra_events.get("on_ready", [])
 # ─────────────────────────────────────────────
 # NUEVOS COMANDOS v1.0.1
 # ─────────────────────────────────────────────
+
+@bot.tree.command(name="sync", description="Sincroniza los slash commands en este servidor")
+async def sync_cmd(interaction: discord.Interaction):
+    synced = await bot.tree.sync(guild=discord.Object(id=interaction.guild_id))
+    await interaction.response.send_message(f"✅ {len(synced)} comandos sincronizados en este servidor.", ephemeral=True)
 
 @bot.tree.command(name="remove", description="Deja de vigilar a un jugador del servidor")
 async def remove(interaction: discord.Interaction, nombre: str, tag: str):
