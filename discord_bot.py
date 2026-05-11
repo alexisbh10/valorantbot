@@ -165,6 +165,15 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     text(header_x, 72, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(20), MUTED)
     text(header_x, 102, modo_display, _FR(16), MUTED)
 
+    header_top = PAD + 1
+    header_bottom = 158
+    header_h = header_bottom - header_top
+
+    frame_w = 180
+    frame_h = 100
+    frame_x = W - PAD - 26 - frame_w
+    frame_y = header_top + (header_h - frame_h) // 2
+
     try:
         profile_url = (
             s.get("profile_image")
@@ -175,8 +184,32 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         )
         if profile_url:
             pf_data = requests.get(profile_url, timeout=6)
-            pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA").resize((170, 96))
-            img.paste(pf, (W - PAD - 170, PAD + 24), pf)
+            pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA")
+
+            scale = max(frame_w / pf.width, frame_h / pf.height)
+            new_w = int(pf.width * scale)
+            new_h = int(pf.height * scale)
+            pf = pf.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            left = (new_w - frame_w) // 2
+            top = (new_h - frame_h) // 2
+            pf = pf.crop((left, top, left + frame_w, top + frame_h))
+
+            mask = Image.new("L", (frame_w, frame_h), 0)
+            md = ImageDraw.Draw(mask)
+            md.rounded_rectangle((0, 0, frame_w, frame_h), radius=18, fill=255)
+
+            final_card = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
+            final_card.paste(pf, (0, 0), mask)
+
+            img.paste(final_card, (frame_x, frame_y), final_card)
+
+            draw.rounded_rectangle(
+                [frame_x, frame_y, frame_x + frame_w, frame_y + frame_h],
+                radius=18,
+                outline=(255, 255, 255, 46),
+                width=1
+            )
     except Exception:
         pass
 
