@@ -33,19 +33,19 @@ CANAL_ALERTAS_ID = 1496883989867139102
 
 def _load_fonts():
     try:
-        regular = requests.get("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", timeout=10)
-        bold = requests.get("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", timeout=10)
+        regular = requests.get("https://github.com/rsms/inter/raw/master/docs/font-files/Inter-Regular.ttf", timeout=10)
+        medium = requests.get("https://github.com/rsms/inter/raw/master/docs/font-files/Inter-Medium.ttf", timeout=10)
+        semibold = requests.get("https://github.com/rsms/inter/raw/master/docs/font-files/Inter-SemiBold.ttf", timeout=10)
         return (
-            lambda s: ImageFont.truetype(io.BytesIO(bold.content), s),
+            lambda s: ImageFont.truetype(io.BytesIO(semibold.content), s),
             lambda s: ImageFont.truetype(io.BytesIO(regular.content), s),
+            lambda s: ImageFont.truetype(io.BytesIO(medium.content), s),
         )
     except Exception:
         f = ImageFont.load_default()
-        return lambda s: f, lambda s: f
+        return lambda s: f, lambda s: f, lambda s: f
 
-
-_FB, _FR = _load_fonts()
-_FM = _FR
+_FB, _FR, _FM = _load_fonts()
 
 
 def _rank_palette(rank):
@@ -108,16 +108,16 @@ def _calc_tracker_metrics_from_stats(s):
 
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
-    W, H = 1180, 680
+    W, H = 1200, 720
     PAD = 34
     BG = (8, 10, 16)
     PANEL = (15, 18, 28)
     PANEL_2 = (20, 24, 36)
     TEXT = (244, 247, 252)
     MUTED = (154, 163, 178)
-    LINE = (37, 43, 60)
-    POS = (92, 224, 152)
-    NEG = (239, 106, 106)
+    LINE = (42, 48, 66)
+    POS = (97, 224, 158)
+    NEG = (241, 104, 112)
 
     def mix(c1, c2, t):
         return tuple(int(c1[i] * (1 - t) + c2[i] * t) for i in range(3))
@@ -125,7 +125,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     def rounded_box(x1, y1, x2, y2, radius, fill, outline=None, width=1):
         draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=outline, width=width)
 
-    def text(x, y, value, font, fill, anchor=None):
+    def text_(x, y, value, font, fill, anchor=None):
         draw.text((x, y), str(value), font=font, fill=fill, anchor=anchor)
 
     def fmt_num(v, digits=1, suffix=""):
@@ -139,35 +139,22 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     img = Image.new("RGBA", (W, H), BG)
     draw = ImageDraw.Draw(img)
 
-    # rank-based vertical gradient
-    top_tint = mix(acc1, BG, 0.55)
-    bottom_tint = mix(acc2, BG, 0.75)
+    top_tint = mix(acc1, BG, 0.58)
+    bottom_tint = mix(acc2, BG, 0.82)
     for y in range(H):
         t = y / max(H - 1, 1)
-        c = mix(top_tint, bottom_tint, t)
-        draw.line([(0, y), (W, y)], fill=c, width=1)
+        draw.line([(0, y), (W, y)], fill=mix(top_tint, bottom_tint, t), width=1)
 
-    # subtle glows
-    for r in range(360, 0, -10):
-        alpha = int(36 * (1 - r / 360))
-        c = (*acc1, alpha)
+    for cx, cy, col, radius in [(80, 78, acc1, 240), (W - 96, H - 104, acc2, 220)]:
         glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
-        gd.ellipse((-(r//3), -80, r, r+40), fill=c)
-        img = Image.alpha_composite(img, glow)
-    for r in range(320, 0, -10):
-        alpha = int(22 * (1 - r / 320))
-        c = (*acc2, alpha)
-        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        gd.ellipse((W-r+40, H-r-100, W+120, H+40), fill=c)
+        gd.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(*col, 26))
         img = Image.alpha_composite(img, glow)
     draw = ImageDraw.Draw(img)
 
-    rounded_box(PAD, PAD, W - PAD, H - PAD, 30, PANEL, outline=(255, 255, 255, 24))
-    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 158, 30, PANEL_2)
+    rounded_box(PAD, PAD, W - PAD, H - PAD, 30, PANEL, outline=(255, 255, 255, 22))
+    rounded_box(PAD + 1, PAD + 1, W - PAD - 1, 154, 30, PANEL_2)
 
-    # header
     try:
         icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
         if icon_url:
@@ -178,85 +165,77 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         pass
 
     header_x = PAD + 138
-    text(header_x, PAD + 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(42), TEXT)
-    text(header_x, PAD + 78, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(22), MUTED)
-    text(header_x, PAD + 110, f"Modo: {modo_display}", _FR(18), mix(MUTED, TEXT, 0.22))
-    text(W - PAD - 26, PAD + 36, "VALORANT STATS", _FB(20), mix(TEXT, acc1, 0.3), anchor="ra")
-    text(W - PAD - 26, PAD + 78, s.get("trend", "Estable ➖"), _FM(20), TEXT, anchor="ra")
+    text_(header_x, PAD + 24, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(42), TEXT)
+    text_(header_x, PAD + 76, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(20), MUTED)
+    text_(header_x, PAD + 106, modo_display, _FR(16), mix(MUTED, TEXT, 0.15))
+    text_(W - PAD - 24, PAD + 32, "VALORANT STATS", _FB(18), mix(TEXT, acc1, 0.18), anchor="ra")
+    text_(W - PAD - 24, PAD + 70, s.get("trend", "Estable ➖"), _FM(18), TEXT, anchor="ra")
 
-    # KPI cards
-    card_y = PAD + 182
-    left = PAD + 24
-    card_w = 206
-    gap = 16
+    kda_val = round((db_stats.get("tk", 0) + db_stats.get("ta", 0)) / max(db_stats.get("td", 1), 1), 2) if tiene_datos_db else s.get("kda")
     metrics = [
-        ("KDA", fmt_num(s.get("kda"), 2), None),
+        ("KDA", fmt_num(kda_val, 2), None),
         ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
         ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
         ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"), POS if float(db_stats.get("winrate") or s.get("winrate") or 0) >= 50 else NEG),
         ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None),
     ]
+
+    card_y = PAD + 182
+    card_w = 210
+    gap = 14
     for i, (label, value, accent) in enumerate(metrics):
-        x1 = left + i * (card_w + gap)
+        x1 = PAD + i * (card_w + gap)
         x2 = x1 + card_w
-        rounded_box(x1, card_y, x2, card_y + 110, 22, (18, 22, 34), outline=(255,255,255,18))
-        text(x1 + 18, card_y + 18, label, _FM(18), MUTED)
-        text(x1 + 18, card_y + 48, value, _FB(34), accent or TEXT)
-        draw.line((x1 + 18, card_y + 88, x2 - 18, card_y + 88), fill=mix(acc1, LINE, 0.7), width=2)
+        rounded_box(x1, card_y, x2, card_y + 108, 24, (17, 21, 32), outline=(255, 255, 255, 18))
+        text_(x1 + 18, card_y + 16, label, _FM(16), MUTED)
+        text_(x1 + 18, card_y + 48, value, _FB(34), accent or TEXT)
+        draw.line((x1 + 18, card_y + 84, x2 - 18, card_y + 84), fill=LINE, width=2)
 
-    # lower panels
-    lower_y = card_y + 136
-    left_w = 520
-    mid_x = PAD + 24 + left_w + 18
-    right_w = W - PAD - 24 - mid_x
+    left_x = PAD
+    left_y = 318
+    left_w = 534
+    right_x = PAD + left_w + 18
+    right_w = W - right_x - PAD
+    rounded_box(left_x, left_y, left_x + left_w, H - PAD - 24, 26, (17, 21, 31), outline=(255, 255, 255, 18))
+    rounded_box(right_x, left_y, right_x + right_w, left_y + 170, 26, (17, 21, 31), outline=(255, 255, 255, 18))
+    rounded_box(right_x, left_y + 190, right_x + right_w, H - PAD - 24, 26, (17, 21, 31), outline=(255, 255, 255, 18))
 
-    rounded_box(PAD + 24, lower_y, PAD + 24 + left_w, H - PAD - 24, 24, (17, 21, 31), outline=(255,255,255,18))
-    rounded_box(mid_x, lower_y, W - PAD - 24, lower_y + 164, 24, (17, 21, 31), outline=(255,255,255,18))
-    rounded_box(mid_x, lower_y + 182, W - PAD - 24, H - PAD - 24, 24, (17, 21, 31), outline=(255,255,255,18))
-
-    # season/db summary
-    text(PAD + 46, lower_y + 22, "Resumen competitivo", _FB(24), TEXT)
-    played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
-    text(PAD + 46, lower_y + 62, f"Partidas analizadas: {played}", _FR(18), MUTED)
-    y0 = lower_y + 112
+    text_(left_x + 24, left_y + 20, "Resumen", _FB(24), TEXT)
+    text_(left_x + 24, left_y + 62, f"Partidas analizadas: {db_stats.get('total_matches', 0) if tiene_datos_db else 0}", _FR(18), MUTED)
     pairs = [
-        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db else "—"),
+        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db and db_stats.get("kast_medio") is not None else "—"),
         ("DDA", fmt_num(db_stats.get("dda_medio"), 1) if tiene_datos_db else "—"),
-        ("Main agent", (db_stats.get("main_agent") or s.get("agent") or "Desconocido") if isinstance(db_stats, dict) else (s.get("agent") or "Desconocido")),
-        ("Mapa actual", s.get("mapa", "Desconocido")),
+        ("Main agent", db_stats.get("main_agent") or s.get("agent") or "Desconocido"),
+        ("Mapa", s.get("mapa", "Desconocido")),
     ]
+    y0 = left_y + 112
     for idx, (lab, val) in enumerate(pairs):
         row_y = y0 + idx * 54
-        text(PAD + 46, row_y, lab, _FM(17), MUTED)
-        text(PAD + 220, row_y - 2, val, _FB(19), TEXT)
+        text_(left_x + 24, row_y, lab, _FM(16), MUTED)
+        text_(left_x + 210, row_y - 2, val, _FB(18), TEXT)
         if idx < len(pairs) - 1:
-            draw.line((PAD + 46, row_y + 34, PAD + 24 + left_w - 24, row_y + 34), fill=LINE, width=1)
+            draw.line((left_x + 24, row_y + 34, left_x + left_w - 24, row_y + 34), fill=LINE, width=1)
 
-    # last match
     lm = s.get("last_match", {}) or {}
-    text(mid_x + 22, lower_y + 18, "Última partida", _FB(24), TEXT)
-    scoreline = f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}"
-    text(mid_x + 22, lower_y + 58, scoreline, _FB(34), TEXT)
-    text(mid_x + 22, lower_y + 102, f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}", _FR(18), MUTED)
-    result_text = "Victoria" if lm.get("won") else "Derrota"
-    result_color = POS if lm.get("won") else NEG
-    text(W - PAD - 48, lower_y + 60, result_text, _FB(26), result_color, anchor="ra")
+    text_(right_x + 22, left_y + 18, "Última partida", _FB(24), TEXT)
+    text_(right_x + 22, left_y + 58, f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}", _FB(38), TEXT)
+    text_(right_x + 22, left_y + 106, f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}", _FR(18), MUTED)
+    text_(right_x + right_w - 24, left_y + 62, "Victoria" if lm.get("won") else "Derrota", _FB(24), POS if lm.get("won") else NEG, anchor="ra")
 
-    # agents badges
-    text(mid_x + 22, lower_y + 204, "Agentes más usados", _FB(24), TEXT)
-    badge_x = mid_x + 22
-    badge_y = lower_y + 250
+    text_(right_x + 22, left_y + 208, "Agentes más usados", _FB(24), TEXT)
+    badge_x = right_x + 22
+    badge_y = left_y + 256
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
     if not agents:
         agents = [s.get("agent", "Desconocido")]
     for ag in agents:
-        w = max(120, 28 + int(len(ag) * 11.5))
-        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 44, 18, mix(acc1, PANEL, 0.18), outline=(255,255,255,20))
-        text(badge_x + 16, badge_y + 11, ag, _FM(18), TEXT)
-        badge_x += w + 12
-        if badge_x > W - PAD - 180:
-            badge_x = mid_x + 22
-            badge_y += 56
+        w = max(108, 24 + int(len(ag) * 10.2))
+        rounded_box(badge_x, badge_y, badge_x + w, badge_y + 40, 18, mix(acc1, PANEL, 0.14), outline=(255, 255, 255, 18))
+        text_(badge_x + 14, badge_y + 9, ag, _FM(16), TEXT)
+        badge_x += w + 10
+        if badge_x > right_x + right_w - 150:
+            badge_x = right_x + 22
+            badge_y += 50
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
@@ -457,65 +436,83 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         await interaction.followup.send(f"❌ Fallo al buscar a {nombre}#{tag}: {err}")
         return
 
-    db_stats = await bot.db.fetchrow(
+    rows = await bot.db.fetch(
         """
-        SELECT
-            SUM(p.kills) as tk,
-            SUM(p.deaths) as td,
-            SUM(p.assists) as ta,
-            AVG(p.acs) as acs_medio,
-            AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL
-                     THEN p.damage_dealt_total::numeric / p.rounds_played
-                     ELSE p.adr END) as adr_medio,
-            AVG(CASE WHEN p.rounds_played > 0 AND p.kast_rounds IS NOT NULL
-                     THEN (p.kast_rounds::numeric * 100.0) / p.rounds_played
-                     ELSE p.kast END) as kast_medio,
-            AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
-                     THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
-                     ELSE p.dda END) as dda_medio,
-            AVG(p.hs) as hs_medio,
-            COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
-            COUNT(*) as total_matches
+        SELECT p.match_id, p.kills, p.deaths, p.assists, p.acs, p.won, p.mapa, p.modo, p.agente,
+               p.adr, p.kast, p.dda, p.rounds_played, p.damage_dealt_total, p.damage_received_total,
+               p.kast_rounds, p.hs, p.fecha
         FROM partidas p
         JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
+        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3
+        ORDER BY p.fecha DESC
+        LIMIT 120
         """,
-        str(interaction.guild_id), nombre, tag, modo_busqueda,
+        str(interaction.guild_id), nombre, tag,
     )
 
-    agent_rows = await bot.db.fetch(
-        """
-        SELECT p.agente, COUNT(*) as count
-        FROM partidas p
-        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3 AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
-        GROUP BY p.agente
-        ORDER BY count DESC
-        """,
-        str(interaction.guild_id), nombre, tag, modo_busqueda,
-    )
+    filtered_rows = rows if modo_busqueda == "%" else [r for r in rows if str(r["modo"]).lower() == modo_busqueda.lower()]
+    if not filtered_rows:
+        await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en **{modo_display}**.")
+        return
 
-    top_agents_db = [r["agente"] for r in agent_rows]
-    tiene_datos_db = bool(db_stats and db_stats["total_matches"] and db_stats["total_matches"] > 0)
+    db_stats = {
+        "tk": sum((r["kills"] or 0) for r in filtered_rows),
+        "td": sum((r["deaths"] or 0) for r in filtered_rows),
+        "ta": sum((r["assists"] or 0) for r in filtered_rows),
+        "acs_medio": round(sum(float(r["acs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "adr_medio": round(sum(float(r["adr"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "dda_medio": round(sum(float(r["dda"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "hs_medio": round(sum(float(r["hs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "winrate": round(sum(1 for r in filtered_rows if r["won"]) * 100.0 / len(filtered_rows), 1),
+        "total_matches": len(filtered_rows),
+    }
+
+    kast_vals = [float(r["kast"]) for r in filtered_rows if r["kast"] is not None]
+    db_stats["kast_medio"] = round(sum(kast_vals) / len(kast_vals), 1) if kast_vals else None
+
+    agent_counts = {}
+    for r in filtered_rows:
+        ag = r["agente"] or "Desconocido"
+        agent_counts[ag] = agent_counts.get(ag, 0) + 1
+    top_agents_db = [a for a, _ in sorted(agent_counts.items(), key=lambda x: x[1], reverse=True)]
+    db_stats["main_agent"] = top_agents_db[0] if top_agents_db else "Desconocido"
+
+    latest = filtered_rows[0]
+    s["mapa"] = latest["mapa"] or s.get("mapa")
+    s["modo"] = latest["modo"] or s.get("modo")
+    s["last_match"] = {
+        "id": latest["match_id"],
+        "kills": latest["kills"] or 0,
+        "deaths": latest["deaths"] or 0,
+        "assists": latest["assists"] or 0,
+        "acs": float(latest["acs"] or 0),
+        "adr": float(latest["adr"] or 0),
+        "dda": float(latest["dda"] or 0),
+        "kast": float(latest["kast"]) if latest["kast"] is not None else None,
+        "hs": float(latest["hs"] or 0),
+        "won": bool(latest["won"]),
+        "agente": latest["agente"] or "Desconocido",
+        "rounds_played": latest["rounds_played"],
+        "damage_dealt_total": latest["damage_dealt_total"],
+        "damage_received_total": latest["damage_received_total"],
+        "kast_rounds": latest["kast_rounds"],
+    }
+
+    tiene_datos_db = bool(db_stats["total_matches"] > 0)
+
     try:
-        buf = await asyncio.wait_for(asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats or {}, top_agents_db), timeout=20)
+        buf = await asyncio.wait_for(
+            asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats, top_agents_db),
+            timeout=20,
+        )
         archivo = discord.File(fp=buf, filename="stats.png")
     except Exception as e:
         logging.exception("Error generando tarjeta /stats")
         await interaction.followup.send(f"❌ Error generando la tarjeta de stats: {e}")
         return
 
-    embed = discord.Embed(color=0x9333EA if s.get("smurf") else 0xFF4655)
+    embed = discord.Embed(color=0xFF4655)
     embed.set_image(url="attachment://stats.png")
-    if tiene_datos_db and top_agents_db:
-        links = []
-        for agent in top_agents_db:
-            if agent == "Desconocido":
-                continue
-            links.append(f"[{agent}](https://lineupsvalorant.com/?agent={urllib.parse.quote(agent)})")
-        if links:
-            embed.add_field(name="📚 Setups", value=" · ".join(links), inline=False)
-
     await interaction.followup.send(file=archivo, embed=embed)
 
 
@@ -1209,9 +1206,6 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
 # ─────────────────────────────────────────────
 
 
-bot.run(TOKEN)
-
-
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     logging.exception("Slash command error", exc_info=error)
@@ -1223,3 +1217,5 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
             await interaction.response.send_message(msg, ephemeral=True)
     except Exception:
         pass
+
+bot.run(TOKEN)
