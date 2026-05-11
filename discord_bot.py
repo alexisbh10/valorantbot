@@ -186,24 +186,20 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
             pf_data = requests.get(profile_url, timeout=6)
             pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA")
 
-            max_w = 190
-            max_h = 92
+            slot_w = 210
+            slot_h = 96
+            slot_x = W - PAD - slot_w
+            slot_y = 18
 
-            scale = min(max_w / pf.width, max_h / pf.height)
+            scale = min(slot_w / pf.width, slot_h / pf.height)
             new_w = int(pf.width * scale)
             new_h = int(pf.height * scale)
-
             pf = pf.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-            img_x = W - PAD - 26 - new_w
+            paste_x = slot_x + (slot_w - new_w) // 2
+            paste_y = slot_y + (slot_h - new_h) // 2
 
-            text_top = 26
-            text_bottom = 102 + 16
-            text_center_y = (text_top + text_bottom) // 2
-
-            img_y = int(text_center_y - new_h / 2)
-
-            img.paste(pf, (img_x, img_y), pf)
+            img.paste(pf, (paste_x, paste_y), pf)
     except Exception:
         pass
 
@@ -262,7 +258,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
 
     draw.line((right_x, base_y + 140, W - PAD, base_y + 140), fill=FAINT, width=1)
 
-    text(right_x, base_y + 180, "Lineups / agentes", _FB(26), TEXT)
+    text(right_x, base_y + 180, "Agentes más usados", _FB(26), TEXT)
 
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
     agents = [a for a in agents if a]
@@ -487,19 +483,24 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     rows = await bot.db.fetch(
         """
-        SELECT p.match_id, p.kills, p.deaths, p.assists, p.acs, p.won, p.mapa, p.modo, p.agente,
-               p.adr, p.kast, p.dda, p.rounds_played, p.damage_dealt_total, p.damage_received_total,
-               p.kast_rounds, p.hs, p.fecha
+        SELECT
+            p.match_id, p.kills, p.deaths, p.assists, p.acs, p.won, p.mapa, p.modo,
+            p.agente, p.adr, p.kast, p.dda, p.rounds_played, p.damage_dealt_total,
+            p.damage_received_total, p.kast_rounds, p.hs, p.fecha
         FROM partidas p
-        JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-        WHERE j.server_id = $1 AND p.jugador_nombre = $2 AND p.jugador_tag = $3
+        JOIN jugadores j
+        ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
+        WHERE j.server_id = $1
+        AND p.jugador_nombre = $2
+        AND p.jugador_tag = $3
+        AND ($4 = '%' OR LOWER(p.modo) = LOWER($4))
         ORDER BY p.fecha DESC
         LIMIT 120
         """,
-        str(interaction.guild_id), nombre, tag,
+        str(interaction.guild_id), nombre, tag, modo_busqueda,
     )
 
-    filtered_rows = rows if modo_busqueda == "%" else [r for r in rows if str(r["modo"]).lower() == modo_busqueda.lower()]
+    filtered_rows = rows
     if not filtered_rows:
         await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en **{modo_display}**.")
         return
