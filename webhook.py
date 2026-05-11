@@ -65,41 +65,9 @@ def extract_tracker_like_match_metrics(match, player):
     damage_received_total = player.get("damage_received") or stats.get("damage_received") or 0
 
     kast_rounds = None
-    round_results = match.get("rounds", []) or match.get("round_results", []) or []
-    if round_results and rounds_played:
-        player_id = player.get("puuid")
-        player_name = (player.get("name") or "").lower()
-        player_tag = (player.get("tag") or "").lower()
-        counted = 0
-        for rnd in round_results:
-            got_kast = False
-            candidates = []
-            for key in ["player_stats", "stats", "players", "all_players"]:
-                section = rnd.get(key)
-                if isinstance(section, list):
-                    candidates.extend(section)
-            for rp in candidates:
-                rp_puuid = rp.get("puuid")
-                rp_name = (rp.get("name") or "").lower()
-                rp_tag = (rp.get("tag") or "").lower()
-                same = (player_id and rp_puuid == player_id) or (rp_name == player_name and rp_tag == player_tag)
-                if not same:
-                    continue
-                has_kill = (rp.get("kills") or 0) > 0
-                has_assist = (rp.get("assists") or 0) > 0
-                survived = bool(rp.get("survived") or rp.get("was_alive") or rp.get("alive"))
-                traded = bool(rp.get("traded") or rp.get("trade") or rp.get("was_traded"))
-                got_kast = has_kill or has_assist or survived or traded
-                break
-            counted += 1
-            if got_kast:
-                kast_rounds = (kast_rounds or 0) + 1
-        if counted == 0:
-            kast_rounds = None
-
     adr = round(damage_dealt_total / max(rounds_played, 1), 2) if rounds_played else 0
     dda = round((damage_dealt_total - damage_received_total) / max(rounds_played, 1), 2) if rounds_played else 0
-    kast = round((kast_rounds / rounds_played) * 100, 2) if (kast_rounds is not None and rounds_played) else None
+    kast = None
     acs = round(score / max(rounds_played, 1), 1) if rounds_played else 0
 
     return {
@@ -277,6 +245,10 @@ def obtener_stats(username, tag, region="eu"):
             s = p.get("stats", {}) or {}
             match_metrics = extract_tracker_like_match_metrics(last_match, p)
             won = get_team_win(last_match, p)
+            hs_last = s.get("headshots", 0) or 0
+            bs_last = s.get("bodyshots", 0) or 0
+            ls_last = s.get("legshots", 0) or 0
+            total_shots_last = hs_last + bs_last + ls_last
             last_match_info = {
                 "id": match_id,
                 "kills": s.get("kills", 0),
@@ -292,6 +264,7 @@ def obtener_stats(username, tag, region="eu"):
                 "adr": match_metrics["adr"],
                 "dda": match_metrics["dda"],
                 "kast": match_metrics["kast"],
+                "hs": round((hs_last / max(total_shots_last, 1)) * 100, 2),
             }
 
     analysis = analyze_matches(matches, puuid, username, tag)
