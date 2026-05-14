@@ -57,28 +57,124 @@ def get_team_win(match, player):
 
 
 def extract_tracker_like_match_metrics(match, player):
-    stats = player.get("stats", {}) or {}
+    stats    = player.get("stats", {}) or {}
     metadata = match.get("metadata", {}) or {}
     rounds_played = metadata.get("rounds_played", 0) or 0
-    score = stats.get("score", 0) or 0
-    damage_dealt_total = player.get("damage_made") or stats.get("damage_made") or 0
-    damage_received_total = player.get("damage_received") or stats.get("damage_received") or 0
+    score         = stats.get("score", 0) or 0
 
-    kast_rounds = None
-    adr = round(damage_dealt_total / max(rounds_played, 1), 2) if rounds_played else 0
-    dda = round((damage_dealt_total - damage_received_total) / max(rounds_played, 1), 2) if rounds_played else 0
-    kast = None
-    acs = round(score / max(rounds_played, 1), 1) if rounds_played else 0
+    puuid  = player.get("puuid", "") or ""
+    p_name = player.get("name", "").lower()
+    p_tag  = player.get("tag", "").lower()
+
+    damage_dealt_total    = 0
+    damage_received_total = 0
+    kast_rounds           = 0
+
+    # KAST: muertes del jugador por ronda (para detectar si sobrevivió)
+    # Precalculamos kills de cada ronda para saber quién murió
+    all_rounds = match.get("rounds") or []
+
+    for rnd in all_rounds:
+        player_stats = rnd.get("player_stats") or []
+
+        # ── Buscar el entry de nuestro jugador en esta ronda ──────────────
+        my_ps = None
+        for ps in player_stats:
+            ps_puuid = ps.get("player_puuid", "") or ""
+            if puuid and ps_puuid == puuid:
+                my_ps = ps
+                break
+            if not puuid:
+                name_check = ps.get("player_display_name", "").lower()
+                if p_name and p_name in name_check:
+                    my_ps = ps
+                    break
+
+        if my_ps is None:
+            continue
+
+        # ── ADR: daño que nuestro jugador hizo a otros ────────────────────
+        for dmg in (my_ps.get("damage") or []):
+            damage_dealt_total += dmg.get("damage", 0) or 0
+
+        # ── DDA: daño que otros hicieron a nuestro jugador ────────────────
+        # Iteramos todos los demás jugadores y sumamos el daño donde receiver == nuestro puuid
+        for ps in player_stats:
+            ps_puuid = ps.get("player_puuid", "") or ""
+            if puuid and ps_puuid == puuid:
+                continue  # saltamos el propio jugador
+            for dmg in (ps.get("damage") or []):
+                receiver = dmg.get("receiver_puuid", "") or ""
+                if puuid and receiver == puuid:
+                    damage_received_total += dmg.get("damage", 0) or 0
+
+        # ── KAST ─────────────────────────────────────────────────────────
+        # K: tuvo al menos 1 kill en la ronda
+        # A: tuvo al menos 1 asistencia en la ronda
+        # S: sobrevivió (no aparece como víctima en ningún kill de la ronda)
+        # T: fue eliminado pero su asesino murió en los 5s siguientes (aproximación: fue traded)
+
+        my_kills    = my_ps.get("kills") or []
+        my_assists  = my_ps.get("assists") or []
+        had_kill    = len(my_kills) > 0
+        had_assist  = len(my_assists) > 0
+
+        # Saber si murió en esta ronda: buscar si aparece como victim en kills de otros
+        died_this_round = False
+        traded          = False
+        my_death_time   = None
+
+        for ps in player_stats:
+            ps_puuid = ps.get("player_puuid", "") or ""
+            if puuid and ps_puuid == puuid:
+                continue
+            for kill in (ps.get("kills") or []):
+                victim_puuid = kill.get("victim_puuid", "") or ""
+                if puuid and victim_puuid == puuid:
+                    died_this_round = True
+                    my_death_time   = kill.get("kill_time_in_round", None)
+
+        survived = not died_this_round
+
+        # T (traded): si murió, comprobar si el asesino fue eliminado en los 5000ms siguientes
+        if died_this_round and my_death_time is not None:
+            killer_puuid = None
+            # buscar quién mató a nuestro jugador
+            for ps in player_stats:
+                ps_puuid_k = ps.get("player_puuid", "") or ""
+                if puuid and ps_puuid_k == puuid:
+                    continue
+                for kill in (ps.get("kills") or []):
+                    if (kill.get("victim_puuid", "") == puuid):
+                        killer_puuid = ps_puuid_k
+            # comprobar si el killer murió en ≤5000ms después
+            if killer_puuid:
+                for ps in player_stats:
+                    for kill in (ps.get("kills") or []):
+                        if kill.get("victim_puuid", "") == killer_puuid:
+                            trade_time = kill.get("kill_time_in_round", None)
+                            if trade_time is not None and my_death_time is not None:
+                                if 0 <= (trade_time - my_death_time) <= 5000:
+                                    traded = True
+
+        if had_kill or had_assist or survived or traded:
+            kast_rounds += 1
+
+    # ── Métricas finales ─────────────────────────────────────────────────
+    adr  = round(damage_dealt_total / max(rounds_played, 1), 2) if rounds_played else 0
+    dda  = round((damage_dealt_total - damage_received_total) / max(rounds_played, 1), 2) if rounds_played else 0
+    kast = round((kast_rounds / max(rounds_played, 1)) * 100, 2) if rounds_played else None
+    acs  = round(score / max(rounds_played, 1), 1) if rounds_played else 0
 
     return {
-        "rounds_played": rounds_played,
-        "damage_dealt_total": damage_dealt_total,
-        "damage_received_total": damage_received_total,
-        "kast_rounds": kast_rounds,
-        "adr": adr,
-        "dda": dda,
-        "kast": kast,
-        "acs": acs,
+        "rounds_played":          rounds_played,
+        "damage_dealt_total":     damage_dealt_total,
+        "damage_received_total":  damage_received_total,
+        "kast_rounds":            kast_rounds,
+        "adr":                    adr,
+        "dda":                    dda,
+        "kast":                   kast,
+        "acs":                    acs,
     }
 
 
