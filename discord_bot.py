@@ -522,7 +522,38 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         "total_matches": len(filtered_rows),
     }
 
-    kast_vals = [float(r["kast"]) for r in filtered_rows if r["kast"] is not None]
+    def _adr_row(r):
+        if r["damage_dealt_total"] and r["rounds_played"]:
+            return float(r["damage_dealt_total"]) / max(int(r["rounds_played"]), 1)
+        return float(r["adr"] or 0)
+
+    def _dda_row(r):
+        if r["damage_dealt_total"] and r["damage_received_total"] and r["rounds_played"]:
+            return (float(r["damage_dealt_total"]) - float(r["damage_received_total"])) / max(int(r["rounds_played"]), 1)
+        return float(r["dda"] or 0)
+
+    def _kast_row(r):
+        if r["kast_rounds"] is not None and r["rounds_played"]:
+            return float(r["kast_rounds"]) * 100.0 / max(int(r["rounds_played"]), 1)
+        if r["kast"] is not None:
+            return float(r["kast"])
+        return None
+
+    db_stats = {
+        "tk": tk,
+        "td": td,
+        "ta": ta,
+        "kda": round((tk + ta) / max(td, 1), 2),
+        "acs_medio": round(sum(float(r["acs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "adr_medio": round(sum(_adr_row(r) for r in filtered_rows) / len(filtered_rows), 1),
+        "dda_medio": round(sum(_dda_row(r) for r in filtered_rows) / len(filtered_rows), 1),
+        "hs_medio": round(sum(float(r["hs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "winrate": round(sum(1 for r in filtered_rows if r["won"]) * 100.0 / len(filtered_rows), 1),
+        "total_matches": len(filtered_rows),
+    }
+
+    kast_vals = [_kast_row(r) for r in filtered_rows]
+    kast_vals = [v for v in kast_vals if v is not None]
     db_stats["kast_medio"] = round(sum(kast_vals) / len(kast_vals), 1) if kast_vals else None
 
     agent_counts = {}
