@@ -105,6 +105,13 @@ def _calc_tracker_metrics_from_stats(s):
         "hs": hs_value,
     }
 
+def mix(c1, c2, t):
+    return tuple(int(c1[i]*(1-t) + c2[i]*t) for i in range(3))
+
+def fmt_num(v, digits=1, suffix=""):
+    if v is None: return "—"
+    try: return f"{round(float(v), digits)}{suffix}"
+    except: return f"{v}{suffix}"
 
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
