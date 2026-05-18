@@ -6,11 +6,20 @@ import traceback
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
 import datetime
+import asyncpg
 
 app = FastAPI()
 
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
 cache = {}
+
+DB_POOL = None
+
+async def get_db():
+    global DB_POOL
+    if DB_POOL is None:
+        DB_POOL = await asyncpg.create_pool(os.getenv("DATABASE_URL"))
+    return DB_POOL
 
 def get_cache(k):
     if k in cache:
@@ -420,3 +429,77 @@ async def tracker(request: Request):
         tb = traceback.format_exc()
         print(f"[/tracker ERROR] {e}\n{tb}")
         return {"success": False, "error": f"Error interno del webhook: {e}"}
+    
+
+# ─── ADMIN ROUTES ───────────────────────────────────────────
+@app.get("/admin/jugadores")
+async def admin_get_jugadores(secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db = await get_db()
+    rows = await db.fetch("SELECT * FROM jugadores ORDER BY id")
+    return [dict(r) for r in rows]
+
+@app.put("/admin/jugadores/{jugador_id}")
+async def admin_update_jugador(jugador_id: int, req: Request, secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    b = await req.json()
+    db = await get_db()
+    await db.execute(
+        "UPDATE jugadores SET nombre=$1, tag=$2, ultimo_rango=$3 WHERE id=$4",
+        b["nombre"], b["tag"], b.get("ultimo_rango"), jugador_id
+    )
+    return {"ok": True}
+
+@app.get("/admin/partidas")
+async def admin_get_partidas(jugador: str = "", modo: str = "", secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db = await get_db()
+    q = "SELECT * FROM partidas WHERE 1=1"
+    params = []
+    if jugador:
+        params.append(f"%{jugador}%")
+        q += f" AND jugador_nombre ILIKE ${len(params)}"
+    if modo:
+        params.append(modo)
+        q += f" AND modo = ${len(params)}"
+    q += " ORDER BY fecha DESC LIMIT 200"
+    rows = await db.fetch(q, *params)
+    return [dict(r) for r in rows]
+
+@app.put("/admin/partidas/{match_id}/{nombre}/{tag}")
+async def admin_update_partida(match_id: str, nombre: str, tag: str, req: Request, secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    b = await req.json()
+    db = await get_db()
+    await db.execute("""
+        UPDATE partidas SET
+            kills=$1, deaths=$2, assists=$3, acs=$4, won=$5,
+            mapa=$6, modo=$7, agente=$8,
+            adr=$9, kast=$10, dda=$11,
+            rounds_played=$12, damage_dealt_total=$13,
+            damage_received_total=$14, kast_rounds=$15, hs=$16
+        WHERE match_id=$17 AND jugador_nombre=$18 AND jugador_tag=$19
+    """,
+        b.get("kills"), b.get("deaths"), b.get("assists"),
+        b.get("acs"), b.get("won"),
+        b.get("mapa"), b.get("modo"), b.get("agente"),
+        b.get("adr"), b.get("kast"), b.get("dda"),
+        b.get("rounds_played"), b.get("damage_dealt_total"),
+        b.get("damage_received_total"), b.get("kast_rounds"), b.get("hs"),
+        match_id, nombre, tag
+    )
+    return {"ok": True}
+
+@app.delete("/admin/partidas/{match_id}/{nombre}/{tag}")
+async def admin_delete_partida(match_id: str, nombre: str, tag: str, secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db = await get_db()
+    await db.execute(
+        "DELETE FROM partidas WHERE match_id=$1 AND jugador_nombre=$2 AND jugador_tag=$3",
+        match_id, nombre, tag)
+    return {"ok": True}
