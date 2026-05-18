@@ -783,243 +783,258 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
 # CHART HELPERS
 # ─────────────────────────────────────────────
 
-def _gen_evolucion(rows, nombre_jugador):
-    """Genera gráfica de línea: ACS, DDA y HS% a lo largo de partidas."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.ticker as ticker
+# ── Helpers PIL compartidos para gráficas ────────────────────────────────────
+_BG     = (10,  11, 17)
+_PANEL  = (15,  17, 25)
+_BORDER = (42,  48, 67)
+_TEXT_G = (245, 247, 251)
+_MUTED_G= (150, 163, 179)
+_TEAL   = (79,  209, 197)
+_RED_G  = (252, 129, 129)
+_GOLD   = (246, 224, 94)
+_GREEN_G= (104, 211, 145)
+_PURPLE = (167, 139, 250)
+_BLUE_G = (118, 228, 247)
+import math as _math
 
-    fechas = [r["fecha"].strftime("%d/%m") for r in rows]
-    acs_vals = [float(r["acs"]) if r["acs"] is not None else None for r in rows]
-    dda_vals = [float(r["dda"]) if r["dda"] is not None else None for r in rows]
-    hs_vals  = [float(r["hs"]) if r.get("hs") is not None else None for r in rows]
-    indices  = list(range(len(rows)))
+CHART_COLORS = [_TEAL,_RED_G,_GOLD,_GREEN_G,_PURPLE,_BLUE_G,(251,211,141),(246,135,179),(154,230,180)]
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 7), facecolor="#0a0b11")
-    fig.suptitle(f"Evolución de {nombre_jugador}", color="#f5f7fb", fontsize=14, fontweight="bold", y=0.98)
+def _gl(a,b,t): return tuple(int(a[i]*(1-t)+b[i]*t) for i in range(3))
+def _rr2(d,x1,y1,x2,y2,r=6,fill=None,outline=None,w=1):
+    d.rounded_rectangle([x1,y1,x2,y2],radius=r,fill=fill,outline=outline,width=w)
 
-    configs = [
-        (axes[0], acs_vals, "ACS",  "#4fd1c5", "#0a4040"),
-        (axes[1], dda_vals, "DDA",  "#fc8181", "#400a0a"),
-        (axes[2], hs_vals,  "HS%",  "#f6e05e", "#3d3300"),
-    ]
+def _chart_base(W, H):
+    img = Image.new("RGBA",(W,H))
+    d   = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y/max(H-1,1)
+        c = _gl(_BG, tuple(max(0,v-6) for v in _BG), t)
+        d.line([(0,y),(W,y)], fill=(*c,255))
+    for cx,cy,rx,ry,col,al in [(-40,-30,260,200,_TEAL,14),(W+40,H+30,220,180,_RED_G,10)]:
+        g = Image.new("RGBA",(W,H),(0,0,0,0))
+        gd= ImageDraw.Draw(g)
+        for i in range(6,0,-1):
+            f=i/6
+            gd.ellipse([cx-rx*f,cy-ry*f,cx+rx*f,cy+ry*f],fill=(*col,int(al*f*0.4)))
+        img = Image.alpha_composite(img,g)
+    return img
 
-    for ax, vals, label, color, fill_color in configs:
-        clean_x = [i for i, v in zip(indices, vals) if v is not None]
-        clean_v = [v for v in vals if v is not None]
-        ax.set_facecolor("#0f1119")
-        for spine in ax.spines.values():
-            spine.set_color("#2a3043")
-        ax.tick_params(colors="#96a3b3", labelsize=8)
-        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-        ax.set_ylabel(label, color=color, fontsize=9, fontweight="bold")
-        if clean_x:
-            ax.fill_between(clean_x, clean_v, alpha=0.15, color=fill_color)
-            ax.plot(clean_x, clean_v, color=color, linewidth=2, marker="o", markersize=4)
-            ax.set_xlim(-0.5, len(indices) - 0.5)
-        ax.set_xticks(indices)
-        ax.set_xticklabels(fechas, rotation=45, ha="right", fontsize=7, color="#96a3b3")
-        ax.grid(axis="y", color="#1e2535", linewidth=0.7)
-        if label == "DDA":
-            ax.axhline(0, color="#555", linewidth=0.8, linestyle="--")
-
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+def _cheader(draw, W, PAD, title, sub=""):
+    draw.text((PAD,14), title, font=_bc_eb(32), fill=(*_TEXT_G,240))
+    if sub: draw.text((PAD,52), sub, font=_bc_r(18), fill=(*_MUTED_G,200))
 
 
-def _gen_heatmap_mapas(rows):
-    """Genera heatmap: mapas × métricas (ACS, WR, DDA)."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+# ── GRÁFICA 1: Evolución ACS / DDA / HS ─────────────────────────────────────
 
-    mapa_stats = {}
+def gen_evolucion(rows, nombre_jugador):
+    if not rows: return None
+    W,H,PAD = 1180,660,44
+    img  = _chart_base(W,H)
+    draw = ImageDraw.Draw(img)
+    fechas  = [r["fecha"].strftime("%d/%m") if hasattr(r.get("fecha",""),"strftime") else "" for r in rows]
+    acs_v   = [float(r["acs"])    if r["acs"]        is not None else None for r in rows]
+    dda_v   = [float(r["dda"])    if r["dda"]        is not None else None for r in rows]
+    hs_v    = [float(r["hs"])     if r.get("hs")     is not None else None for r in rows]
+    n       = len(rows)
+    _cheader(draw, W, PAD, f"Evolución · {nombre_jugador}", f"{n} partidas  ·  ACS / DDA / HS%")
+    panels  = [("ACS",acs_v,_TEAL,None),("DDA",dda_v,_RED_G,0.0),("HS%",hs_v,_GOLD,None)]
+    TOP0    = 80; p_h = (H-TOP0-PAD)//3; GAP = 8
+    for pi,(label,vals,color,zero) in enumerate(panels):
+        pt = TOP0+pi*p_h+(GAP if pi>0 else 0); pb = pt+p_h-GAP
+        lx = PAD+54; rx = W-PAD-12
+        _rr2(draw,PAD,pt-4,W-PAD,pb+4,fill=(*_PANEL,180),outline=(*_BORDER,60))
+        clean = [(i,v) for i,v in enumerate(vals) if v is not None]
+        if not clean:
+            draw.text((lx+8,(pt+pb)//2),"Sin datos",font=_bc_r(16),fill=(*_MUTED_G,150),anchor="lm"); continue
+        xs,ys = zip(*clean)
+        vmn,vmx,vmed = min(ys),max(ys),sum(ys)/len(ys)
+        rng = max(vmx-vmn,1)
+        def tp(i,v): return lx+(i/max(n-1,1))*(rx-lx), pb-((v-vmn)/rng)*(pb-pt-8)-4
+        if zero is not None and vmn<=zero<=vmx:
+            zy=pb-((zero-vmn)/rng)*(pb-pt-8)-4
+            draw.line([(lx,zy),(rx,zy)],fill=(*_MUTED_G,60),width=1)
+        my=pb-((vmed-vmn)/rng)*(pb-pt-8)-4
+        draw.line([(lx,my),(rx,my)],fill=(*color,50),width=1)
+        draw.text((rx+6,my),fmt_num(vmed,1),font=_bc_r(13),fill=(*_MUTED_G,180),anchor="lm")
+        fl=Image.new("RGBA",(W,H),(0,0,0,0)); fld=ImageDraw.Draw(fl)
+        pts=[(lx,pb)]+[tp(i,v) for i,v in clean]+[(tp(xs[-1],ys[-1])[0],pb)]
+        fld.polygon(pts,fill=(*color,18)); img=Image.alpha_composite(img,fl); draw=ImageDraw.Draw(img)
+        for i in range(len(xs)-1):
+            lc=_gl(color,_GREEN_G,0.35) if ys[i+1]>=ys[i] else _gl(color,_RED_G,0.35)
+            draw.line([tp(xs[i],ys[i]),tp(xs[i+1],ys[i+1])],fill=(*lc,220),width=3)
+        for i,v in clean:
+            px_,py_=tp(i,v); dc=_GREEN_G if v>=vmed else _RED_G
+            draw.ellipse([px_-5,py_-5,px_+5,py_+5],fill=(*dc,200))
+            draw.ellipse([px_-3,py_-3,px_+3,py_+3],fill=(*_TEXT_G,230))
+        draw.text((PAD+8,(pt+pb)//2),label,font=_bc_eb(22),fill=(*color,230),anchor="lm")
+        if pi==len(panels)-1:
+            step=max(1,n//12)
+            for i in range(0,n,step):
+                px_,_=tp(i,vmn)
+                draw.text((px_,pb+8),fechas[i] if i<len(fechas) else "",font=_bc_r(13),fill=(*_MUTED_G,160),anchor="mt")
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
+
+
+# ── GRÁFICA 2: Heatmap por mapa ──────────────────────────────────────────────
+
+def gen_heatmap_mapas(rows):
+    ms={}
     for r in rows:
-        m = r["mapa"] or "?"
-        if m not in mapa_stats:
-            mapa_stats[m] = {"acs": [], "won": [], "dda": []}
-        if r["acs"] is not None:
-            mapa_stats[m]["acs"].append(float(r["acs"]))
-        mapa_stats[m]["won"].append(1 if r["won"] else 0)
-        if r["dda"] is not None:
-            mapa_stats[m]["dda"].append(float(r["dda"]))
-
-    mapas = sorted(mapa_stats.keys())
-    if not mapas:
-        return None
-
-    metricas = ["ACS medio", "Winrate %", "DDA medio"]
-    data = []
-    for m in mapas:
-        s_ = mapa_stats[m]
-        acs_m = sum(s_["acs"]) / len(s_["acs"]) if s_["acs"] else 0
-        wr_m  = sum(s_["won"]) / len(s_["won"]) * 100 if s_["won"] else 0
-        dda_m = sum(s_["dda"]) / len(s_["dda"]) if s_["dda"] else 0
-        data.append([acs_m, wr_m, dda_m])
-
-    arr = np.array(data, dtype=float)
-    # normalise each column 0–1 for color
-    normed = np.zeros_like(arr)
-    for c in range(arr.shape[1]):
-        col = arr[:, c]
-        mn, mx = col.min(), col.max()
-        normed[:, c] = (col - mn) / (mx - mn) if mx != mn else 0.5
-
-    fig, ax = plt.subplots(figsize=(7, max(3, len(mapas) * 0.65)), facecolor="#0a0b11")
-    ax.set_facecolor("#0f1119")
-    im = ax.imshow(normed, aspect="auto", cmap="RdYlGn", vmin=0, vmax=1)
-    ax.set_xticks(range(len(metricas)))
-    ax.set_xticklabels(metricas, color="#f5f7fb", fontsize=10)
-    ax.set_yticks(range(len(mapas)))
-    ax.set_yticklabels(mapas, color="#f5f7fb", fontsize=10)
-    for spine in ax.spines.values():
-        spine.set_color("#2a3043")
-    ax.tick_params(colors="#96a3b3")
-    for r_i in range(len(mapas)):
-        for c_i in range(len(metricas)):
-            val = arr[r_i, c_i]
-            txt = f"{val:.0f}" if c_i != 1 else f"{val:.0f}%"
-            ax.text(c_i, r_i, txt, ha="center", va="center", fontsize=9,
-                    color="white", fontweight="bold")
-    ax.set_title("Rendimiento por mapa", color="#f5f7fb", fontsize=12, pad=10)
-    plt.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+        m=r["mapa"] or "?"
+        if m not in ms: ms[m]={"acs":[],"won":[],"dda":[],"n":0}
+        ms[m]["n"]+=1
+        if r["acs"] is not None: ms[m]["acs"].append(float(r["acs"]))
+        ms[m]["won"].append(1 if r["won"] else 0)
+        if r["dda"] is not None: ms[m]["dda"].append(float(r["dda"]))
+    mapas=sorted(ms.keys())
+    if not mapas: return None
+    cols=["MAPA","PARTIDAS","ACS","WR %","DDA"]; col_w=[180,110,110,100,110]
+    ROW_H=52; HEAD_H=72; PAD=44
+    W=PAD*2+sum(col_w)+20; H=HEAD_H+ROW_H*len(mapas)+PAD+20
+    img=_chart_base(W,H); draw=ImageDraw.Draw(img)
+    _cheader(draw,W,PAD,"Rendimiento por mapa")
+    cx=PAD
+    for col,cw in zip(cols,col_w):
+        draw.text((cx+cw//2,HEAD_H-14),col,font=_bc_m(16),fill=(*_MUTED_G,200),anchor="mm"); cx+=cw
+    all_acs=[sum(ms[m]["acs"])/len(ms[m]["acs"]) for m in mapas if ms[m]["acs"]]
+    all_wr =[sum(ms[m]["won"])/len(ms[m]["won"])*100 for m in mapas]
+    all_dda=[sum(ms[m]["dda"])/len(ms[m]["dda"]) if ms[m]["dda"] else None for m in mapas]
+    def ncol(val,vals,hi=True):
+        cl=[v for v in vals if v is not None]
+        if not cl or max(cl)==min(cl): return _MUTED_G
+        t=(val-min(cl))/(max(cl)-min(cl))
+        if not hi: t=1-t
+        return _GREEN_G if t>0.66 else _GOLD if t>0.33 else _RED_G
+    for ri,m in enumerate(mapas):
+        st=ms[m]; ry=HEAD_H+ri*ROW_H
+        _rr2(draw,PAD,ry+3,W-PAD,ry+ROW_H-3,r=6,fill=(*(_PANEL if ri%2==0 else _BG),160))
+        av=sum(st["acs"])/len(st["acs"]) if st["acs"] else None
+        wv=sum(st["won"])/len(st["won"])*100
+        dv=sum(st["dda"])/len(st["dda"]) if st["dda"] else None
+        row=[(m,None),(str(st["n"]),_MUTED_G),(fmt_num(av,0),ncol(av,all_acs) if av else _MUTED_G),
+             (fmt_num(wv,1,"%"),ncol(wv,all_wr)),(fmt_num(dv,1) if dv is not None else "—",ncol(dv,[v for v in all_dda if v is not None]) if dv is not None else _MUTED_G)]
+        cx=PAD
+        for ci,((txt,col),cw) in enumerate(zip(row,col_w)):
+            draw.text((cx+cw//2,ry+ROW_H//2),txt,font=_bc_b(20) if ci==0 else _bc_m(20),fill=(*(col or _TEXT_G),230),anchor="mm"); cx+=cw
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 
-def _gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
-    """Genera pie chart de agentes."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+# ── GRÁFICA 3: Donut agentes ─────────────────────────────────────────────────
 
-    agentes = [r["agente"] for r in agent_rows if r["agente"] != "Desconocido"]
-    counts  = [r["count"]  for r in agent_rows if r["agente"] != "Desconocido"]
-    if not agentes:
-        return None
-
-    COLORS = ["#4fd1c5","#fc8181","#f6e05e","#68d391","#76e4f7",
-              "#a78bfa","#f687b3","#fbd38d","#9ae6b4","#bee3f8"]
-
-    fig, ax = plt.subplots(figsize=(6, 5), facecolor="#0a0b11")
-    wedges, texts, autotexts = ax.pie(
-        counts, labels=agentes, autopct="%1.0f%%",
-        colors=COLORS[:len(agentes)], startangle=140,
-        textprops={"color": "#f5f7fb", "fontsize": 10},
-        wedgeprops={"linewidth": 1.5, "edgecolor": "#0a0b11"},
-    )
-    for at in autotexts:
-        at.set_fontsize(9)
-        at.set_color("#0a0b11")
-        at.set_fontweight("bold")
-    ax.set_title(titulo, color="#f5f7fb", fontsize=13, fontweight="bold", pad=14)
-    plt.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-
-def _gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
-    """Genera gráfica de barras horizontales comparando dos jugadores."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    metricas = ["ACS", "KDA", "ADR", "KAST %", "DDA", "WR %", "HS %"]
-    vals_a = [
-        float(stats_a.get("acs_medio") or 0),
-        round((float(stats_a.get("tk") or 0) + float(stats_a.get("ta") or 0)) / max(float(stats_a.get("td") or 1), 1), 2),
-        float(stats_a.get("adr_medio") or 0),
-        float(stats_a.get("kast_medio") or 0),
-        float(stats_a.get("dda_medio") or 0),
-        float(stats_a.get("winrate") or 0),
-        float(stats_a.get("hs_medio") or 0),
-    ]
-    vals_b = [
-        float(stats_b.get("acs_medio") or 0),
-        round((float(stats_b.get("tk") or 0) + float(stats_b.get("ta") or 0)) / max(float(stats_b.get("td") or 1), 1), 2),
-        float(stats_b.get("adr_medio") or 0),
-        float(stats_b.get("kast_medio") or 0),
-        float(stats_b.get("dda_medio") or 0),
-        float(stats_b.get("winrate") or 0),
-        float(stats_b.get("hs_medio") or 0),
-    ]
-
-    y = np.arange(len(metricas))
-    bar_h = 0.32
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor="#0a0b11")
-    ax.set_facecolor("#0f1119")
-    bars_a = ax.barh(y + bar_h/2, vals_a, bar_h, color="#4fd1c5", label=nombre_a)
-    bars_b = ax.barh(y - bar_h/2, vals_b, bar_h, color="#fc8181", label=nombre_b)
-    ax.set_yticks(y)
-    ax.set_yticklabels(metricas, color="#f5f7fb", fontsize=11)
-    ax.tick_params(axis="x", colors="#96a3b3", labelsize=9)
-    for spine in ax.spines.values():
-        spine.set_color("#2a3043")
-    ax.grid(axis="x", color="#1e2535", linewidth=0.7)
-    ax.legend(facecolor="#0f1119", edgecolor="#2a3043", labelcolor="#f5f7fb", fontsize=10)
-    ax.set_title(f"{nombre_a}  vs  {nombre_b}", color="#f5f7fb", fontsize=13, fontweight="bold", pad=12)
-    for bar in bars_a:
-        w = bar.get_width()
-        ax.text(w + 0.5, bar.get_y() + bar.get_height()/2, f"{w:.1f}", va="center", color="#4fd1c5", fontsize=8)
-    for bar in bars_b:
-        w = bar.get_width()
-        ax.text(w + 0.5, bar.get_y() + bar.get_height()/2, f"{w:.1f}", va="center", color="#fc8181", fontsize=8)
-    plt.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+def gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
+    ags=[r["agente"] for r in agent_rows if r["agente"] not in (None,"Desconocido")]
+    cts=[r["count"]  for r in agent_rows if r["agente"] not in (None,"Desconocido")]
+    if not ags: return None
+    W,H=900,480; PAD=40; CX,CY=260,H//2; RO=170; RI=90
+    img=_chart_base(W,H); draw=ImageDraw.Draw(img)
+    _cheader(draw,W,PAD,titulo,f"{sum(cts)} partidas · {len(ags)} agentes")
+    total=sum(cts); start=-90.0
+    for i,(ag,cnt) in enumerate(zip(ags,cts)):
+        col=CHART_COLORS[i%len(CHART_COLORS)]; ang=cnt/total*360
+        s=Image.new("RGBA",(W,H),(0,0,0,0)); ds=ImageDraw.Draw(s)
+        ds.pieslice([CX-RO,CY-RO,CX+RO,CY+RO],start,start+ang,fill=(*col,210))
+        ds.ellipse([CX-RI,CY-RI,CX+RI,CY+RI],fill=(0,0,0,0))
+        img=Image.alpha_composite(img,s); draw=ImageDraw.Draw(img)
+        if cnt/total>0.05:
+            mid=start+ang/2
+            lx=CX+(RI+(RO-RI)*0.55)*_math.cos(_math.radians(mid))
+            ly=CY+(RI+(RO-RI)*0.55)*_math.sin(_math.radians(mid))
+            draw.text((lx,ly),f"{cnt/total*100:.0f}%",font=_bc_b(16),fill=(*_TEXT_G,230),anchor="mm")
+        start+=ang
+    draw.ellipse([CX-RI,CY-RI,CX+RI,CY+RI],fill=(*_PANEL,255))
+    draw.text((CX,CY-12),str(total),font=_bc_eb(34),fill=(*_TEXT_G,240),anchor="mm")
+    draw.text((CX,CY+18),"partidas",font=_bc_r(16),fill=(*_MUTED_G,200),anchor="mm")
+    LX=CX+RO+40
+    for i,(ag,cnt) in enumerate(zip(ags,cts)):
+        col=CHART_COLORS[i%len(CHART_COLORS)]; ly=90+i*46
+        if ly+36>H-PAD: break
+        _rr2(draw,LX,ly,LX+18,ly+18,r=4,fill=(*col,220))
+        draw.text((LX+28,ly+9),ag,font=_bc_b(20),fill=(*_TEXT_G,230),anchor="lm")
+        draw.text((W-PAD,ly+9),f"{cnt/total*100:.0f}%",font=_bc_r(18),fill=(*_MUTED_G,190),anchor="rm")
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 
-def _gen_precision(rows, nombre_jugador):
-    """Genera gráfica de precisión HS% por partida con media móvil."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+# ── GRÁFICA 4: Comparativa barras ────────────────────────────────────────────
 
-    hs_data = [(r["fecha"].strftime("%d/%m"), float(r["hs"])) for r in rows if r.get("hs") is not None]
-    if not hs_data:
-        return None
+def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
+    mets=["ACS","KDA","ADR","KAST %","DDA","WR %","HS %"]
+    def kda(s): return round((float(s.get("tk") or 0)+float(s.get("ta") or 0))/max(float(s.get("td") or 1),1),2)
+    va=[float(stats_a.get("acs_medio") or 0),kda(stats_a),float(stats_a.get("adr_medio") or 0),
+        float(stats_a.get("kast_medio") or 0),float(stats_a.get("dda_medio") or 0),
+        float(stats_a.get("winrate") or 0),float(stats_a.get("hs_medio") or 0)]
+    vb=[float(stats_b.get("acs_medio") or 0),kda(stats_b),float(stats_b.get("adr_medio") or 0),
+        float(stats_b.get("kast_medio") or 0),float(stats_b.get("dda_medio") or 0),
+        float(stats_b.get("winrate") or 0),float(stats_b.get("hs_medio") or 0)]
+    n=len(mets); ROW_H=70; PAD=44; HEAD_H=80; W=1000; H=HEAD_H+n*ROW_H+PAD
+    img=_chart_base(W,H); draw=ImageDraw.Draw(img)
+    _cheader(draw,W,PAD,f"{nombre_a}  vs  {nombre_b}","Comparativa de métricas competitivas")
+    MID=W//2; BAR_MAX=MID-PAD-120
+    _rr2(draw,MID-130,12,MID-10,36,r=4,fill=(*_TEAL,180))
+    draw.text((MID-70,24),nombre_a[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
+    _rr2(draw,MID+10,12,MID+130,36,r=4,fill=(*_RED_G,180))
+    draw.text((MID+70,24),nombre_b[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
+    for i,(met,a,b) in enumerate(zip(mets,va,vb)):
+        ry=HEAD_H+i*ROW_H
+        if i%2==0: _rr2(draw,PAD,ry+4,W-PAD,ry+ROW_H-4,r=6,fill=(*_PANEL,140))
+        draw.text((MID,ry+ROW_H//2),met,font=_bc_eb(22),fill=(*_MUTED_G,200),anchor="mm")
+        vmx=max(abs(a),abs(b),0.01)
+        ba=int(BAR_MAX*abs(a)/vmx); ca=_TEAL if a>=b else _gl(_TEAL,_RED_G,0.4)
+        _rr2(draw,MID-90-ba,ry+18,MID-90,ry+ROW_H-18,r=4,fill=(*ca,200))
+        draw.text((MID-95,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(*ca,240),anchor="rm")
+        bb=int(BAR_MAX*abs(b)/vmx); cb=_RED_G if b>a else _gl(_RED_G,_TEAL,0.4)
+        _rr2(draw,MID+90,ry+18,MID+90+bb,ry+ROW_H-18,r=4,fill=(*cb,200))
+        draw.text((MID+95,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(*cb,240),anchor="lm")
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
-    fechas, vals = zip(*hs_data)
-    indices = list(range(len(vals)))
-    media_movil = np.convolve(vals, np.ones(3)/3, mode="same")
 
-    fig, ax = plt.subplots(figsize=(10, 3.5), facecolor="#0a0b11")
-    ax.set_facecolor("#0f1119")
-    for spine in ax.spines.values():
-        spine.set_color("#2a3043")
-    ax.fill_between(indices, vals, alpha=0.12, color="#f6e05e")
-    ax.plot(indices, vals, color="#f6e05e", linewidth=1.5, marker="o", markersize=4, label="HS% real")
-    ax.plot(indices, media_movil, color="#fc8181", linewidth=2, linestyle="--", label="Media móvil (3)")
-    ax.axhline(sum(vals)/len(vals), color="#888", linewidth=0.9, linestyle=":", label=f"Media global ({sum(vals)/len(vals):.1f}%)")
-    ax.set_xticks(indices)
-    ax.set_xticklabels(fechas, rotation=45, ha="right", fontsize=7, color="#96a3b3")
-    ax.tick_params(axis="y", colors="#96a3b3", labelsize=9)
-    ax.grid(axis="y", color="#1e2535", linewidth=0.7)
-    ax.set_title(f"Precisión (HS%) — {nombre_jugador}", color="#f5f7fb", fontsize=12, fontweight="bold")
-    ax.legend(facecolor="#0f1119", edgecolor="#2a3043", labelcolor="#f5f7fb", fontsize=9)
-    plt.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+# ── GRÁFICA 5: Precisión HS% ─────────────────────────────────────────────────
+
+def gen_precision(rows, nombre_jugador):
+    hd=[(r["fecha"].strftime("%d/%m") if hasattr(r.get("fecha",""),"strftime") else "",float(r["hs"]))
+        for r in rows if r.get("hs") is not None]
+    if not hd: return None
+    fechas,vals=zip(*hd); n=len(vals); media=sum(vals)/n
+    movil=[sum(vals[max(0,i-1):i+2])/len(vals[max(0,i-1):i+2]) for i in range(n)]
+    W,H,PAD=1180,380,44
+    img=_chart_base(W,H); draw=ImageDraw.Draw(img)
+    _cheader(draw,W,PAD,f"Precisión HS% · {nombre_jugador}",
+             f"Media {media:.1f}%   Mejor {max(vals):.1f}%   Peor {min(vals):.1f}%   {n} partidas")
+    LEFT=PAD+54; RIGHT=W-PAD-16; TOP=80; BOT=H-46
+    vmn=max(0,min(vals)-6); vmx=max(vals)+6; rng=max(vmx-vmn,1)
+    def tp(i,v): return LEFT+(i/max(n-1,1))*(RIGHT-LEFT), BOT-((v-vmn)/rng)*(BOT-TOP)
+    for ti in range(5):
+        tv=vmn+(rng/4)*ti; ty=BOT-((tv-vmn)/rng)*(BOT-TOP)
+        draw.line([(LEFT,ty),(RIGHT,ty)],fill=(*_BORDER,40),width=1)
+        draw.text((LEFT-8,ty),f"{tv:.0f}%",font=_bc_r(13),fill=(*_MUTED_G,160),anchor="rm")
+    my=BOT-((media-vmn)/rng)*(BOT-TOP)
+    draw.line([(LEFT,my),(RIGHT,my)],fill=(*_MUTED_G,50),width=1)
+    draw.text((RIGHT+6,my),f"{media:.1f}%",font=_bc_m(14),fill=(*_MUTED_G,200),anchor="lm")
+    fl=Image.new("RGBA",(W,H),(0,0,0,0)); fld=ImageDraw.Draw(fl)
+    fld.polygon([(LEFT,BOT)]+[tp(i,v) for i,v in enumerate(vals)]+[(RIGHT,BOT)],fill=(*_GOLD,22))
+    img=Image.alpha_composite(img,fl); draw=ImageDraw.Draw(img)
+    for i in range(n-1):
+        lc=_gl(_GOLD,_GREEN_G,0.4) if vals[i+1]>vals[i] else _gl(_GOLD,_RED_G,0.4)
+        draw.line([tp(i,vals[i]),tp(i+1,vals[i+1])],fill=(*lc,220),width=3)
+    for i in range(n-1):
+        x0,y0=tp(i,movil[i]); x1,y1=tp(i+1,movil[i+1])
+        for s in range(6):
+            if s%2==0:
+                draw.line([(x0+(x1-x0)*s/6,y0+(y1-y0)*s/6),(x0+(x1-x0)*(s+1)/6,y0+(y1-y0)*(s+1)/6)],fill=(*_RED_G,180),width=2)
+    for i,v in enumerate(vals):
+        px_,py_=tp(i,v); dc=_GREEN_G if v>=media else _RED_G
+        draw.ellipse([px_-5,py_-5,px_+5,py_+5],fill=(*dc,200))
+        draw.ellipse([px_-3,py_-3,px_+3,py_+3],fill=(*_TEXT_G,230))
+    step=max(1,n//12)
+    for i in range(0,n,step):
+        px_,_=tp(i,vmn)
+        draw.text((px_,BOT+6),fechas[i] if i<len(fechas) else "",font=_bc_r(13),fill=(*_MUTED_G,160),anchor="mt")
+    lx=W-PAD-220; ly=12
+    _rr2(draw,lx-10,ly-2,W-PAD,ly+62,r=8,fill=(*_PANEL,220))
+    draw.line([(lx,ly+16),(lx+28,ly+16)],fill=(*_GOLD,210),width=3)
+    draw.text((lx+36,ly+10),"HS% real",font=_bc_m(16),fill=(*_TEXT_G,230))
+    for s in range(4): draw.line([(lx+s*8,ly+44),(lx+s*8+6,ly+44)],fill=(*_RED_G,180),width=2)
+    draw.text((lx+36,ly+38),"Media móvil",font=_bc_m(16),fill=(*_TEXT_G,220))
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 
 # ─────────────────────────────────────────────
