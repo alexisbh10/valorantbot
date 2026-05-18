@@ -458,86 +458,118 @@ async def vigilante_partidas():
     await bot.wait_until_ready()
     try:
         canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
-    except Exception:
-        print("⚠️ ERROR: No se puede encontrar el canal de alertas.")
+    except Exception as e:
+        print(f"⚠️ ERROR CRÍTICO: No se puede encontrar el canal de alertas (ID: {CANAL_ALERTAS_ID}). Revisa el ID y los permisos del bot. Error: {e}")
         return
 
-    jugadores = await bot.db.fetch("SELECT DISTINCT nombre, tag FROM jugadores")
+    try:
+        jugadores = await bot.db.fetch("SELECT DISTINCT nombre, tag FROM jugadores")
+    except Exception as e:
+        print(f"⚠️ ERROR leyendo la base de datos en vigilante_partidas: {e}")
+        return
+
     if not jugadores:
         return
 
     for j in jugadores:
-        nombre, tag = j["nombre"], j["tag"]
-        s, err = await fetch_stats(nombre, tag)
-        await asyncio.sleep(4)
-        if err or not s or not s.get("last_match"):
-            continue
-
-        lm = s["last_match"]
-        match_id = lm.get("id")
-        existe = await bot.db.fetchval(
-            "SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre = $2 AND jugador_tag = $3",
-            match_id, nombre, tag,
-        )
-        if match_id and not existe:
-            k = lm.get("kills", 0)
-            d = lm.get("deaths", 1)
-            a = lm.get("assists", 0)
-            acs = lm.get("acs", 0)
-            won = lm.get("won", False)
-            agente = lm.get("agente", "Desconocido")
-            mapa = s.get("mapa", "Desconocido")
-            modo_raw = (s.get("modo") or "Unrated").strip()
-            modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
-            total_partidas = await bot.db.fetchval(
-                "SELECT COUNT(*) FROM partidas WHERE jugador_nombre = $1 AND jugador_tag = $2",
-                nombre, tag,
-            )
-            es_primera_vez = total_partidas == 0
-
-            tracker_metrics = _calc_tracker_metrics_from_stats(s)
-            await bot.db.execute(
-                """
-                INSERT INTO partidas (
-                    match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente,
-                    adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-                """,
-                match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente,
-                tracker_metrics["adr"], tracker_metrics["kast"], tracker_metrics["dda"],
-                tracker_metrics["rounds_played"], tracker_metrics["damage_dealt_total"],
-                tracker_metrics["damage_received_total"], tracker_metrics["kast_rounds"],
-                s.get("last_match", {}).get("hs") if s.get("last_match", {}).get("hs") is not None else (tracker_metrics.get("hs") if tracker_metrics.get("hs") is not None else s.get("hs")),
-            )
-
-            if es_primera_vez:
+        try:
+            nombre, tag = j["nombre"], j["tag"]
+            s, err = await fetch_stats(nombre, tag)
+            
+            # Pausa obligatoria para no saturar la API de Riot
+            await asyncio.sleep(4)
+            
+            if err or not s or not s.get("last_match"):
                 continue
 
-            await _check_racha(nombre, tag, canal)
-            nuevo_rango = s.get("rank")
-            await _check_rango(nombre, tag, nuevo_rango, canal)
+            lm = s["last_match"]
+            match_id = lm.get("id")
+            
+            existe = await bot.db.fetchval(
+                "SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre = $2 AND jugador_tag = $3",
+                match_id, nombre, tag,
+            )
+            
+            if match_id and not existe:
+                k = lm.get("kills", 0)
+                d = lm.get("deaths", 1)
+                a = lm.get("assists", 0)
+                acs = lm.get("acs", 0)
+                won = lm.get("won", False)
+                agente = lm.get("agente", "Desconocido")
+                mapa = s.get("mapa", "Desconocido")
+                modo_raw = (s.get("modo") or "Unrated").strip()
+                modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
+                
+                # Revisar si es la primera partida registrada ANTES de insertar
+                total_partidas = await bot.db.fetchval(
+                    "SELECT COUNT(*) FROM partidas WHERE jugador_nombre = $1 AND jugador_tag = $2",
+                    nombre, tag,
+                )
+                es_primera_vez = total_partidas == 0
 
-            resultado = "VICTORIA" if won else "DERROTA"
-            color_borde = 0x00FF00 if won else 0xFF0000
-            nombre_real = s.get("nombre") or nombre
-            tag_real = s.get("tag") or tag
-            title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
-            desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+                tracker_metrics = _calc_tracker_metrics_from_stats(s)
+                hs_val = s.get("last_match", {}).get("hs") if s.get("last_match", {}).get("hs") is not None else (tracker_metrics.get("hs") if tracker_metrics.get("hs") is not None else s.get("hs"))
+                
+                await bot.db.execute(
+                    """
+                    INSERT INTO partidas (
+                        match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente,
+                        adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                    """,
+                    match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente,
+                    tracker_metrics["adr"], tracker_metrics["kast"], tracker_metrics["dda"],
+                    tracker_metrics["rounds_played"], tracker_metrics["damage_dealt_total"],
+                    tracker_metrics["damage_received_total"], tracker_metrics["kast_rounds"],
+                    hs_val,
+                )
 
-            embed = discord.Embed(title=title, description=desc, color=color_borde)
-            embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
-            embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
-            embed.add_field(name="ACS", value=str(acs), inline=True)
-            if tracker_metrics["adr"] is not None:
-                embed.add_field(name="ADR", value=str(round(tracker_metrics["adr"], 1)), inline=True)
-            if tracker_metrics["kast"] is not None:
-                embed.add_field(name="KAST", value=f"{round(tracker_metrics['kast'], 1)}%", inline=True)
-            if tracker_metrics["dda"] is not None:
-                embed.add_field(name="DDA", value=str(round(tracker_metrics["dda"], 1)), inline=True)
-            if s.get("card"):
-                embed.set_thumbnail(url=s.get("card"))
-            await canal.send(embed=embed)
+                if es_primera_vez:
+                    print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control. No se envía alerta.")
+                    continue
+
+                # Si llegamos aquí, es una partida nueva real.
+                await _check_racha(nombre, tag, canal)
+                nuevo_rango = s.get("rank")
+                await _check_rango(nombre, tag, nuevo_rango, canal)
+
+                resultado = "VICTORIA" if won else "DERROTA"
+                color_borde = 0x00FF00 if won else 0xFF0000
+                nombre_real = s.get("nombre") or nombre
+                tag_real = s.get("tag") or tag
+                title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
+                desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
+
+                embed = discord.Embed(title=title, description=desc, color=color_borde)
+                embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
+                embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
+                embed.add_field(name="ACS", value=str(acs), inline=True)
+                if tracker_metrics["adr"] is not None:
+                    embed.add_field(name="ADR", value=str(round(tracker_metrics["adr"], 1)), inline=True)
+                if tracker_metrics["kast"] is not None:
+                    embed.add_field(name="KAST", value=f"{round(tracker_metrics['kast'], 1)}%", inline=True)
+                if tracker_metrics["dda"] is not None:
+                    embed.add_field(name="DDA", value=str(round(tracker_metrics["dda"], 1)), inline=True)
+                if s.get("card"):
+                    embed.set_thumbnail(url=s.get("card"))
+                
+                await canal.send(embed=embed)
+                print(f"✅ Alerta de {nombre}#{tag} enviada correctamente a Discord.")
+                
+        except Exception as e:
+            # Ahora si explota un jugador, el bot sigue procesando al resto.
+            print(f"❌ Error procesando a {j['nombre']}#{j['tag']}: {e}")
+
+# Manejador de errores global para que el bucle no muera en silencio
+@vigilante_partidas.error
+async def vigilante_partidas_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE VIGILANCIA: {error}")
+    
+@resumen_semanal.error
+async def resumen_semanal_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
 
 
 async def fetch_stats(nombre, tag, region="eu"):
