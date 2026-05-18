@@ -1502,4 +1502,16 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         pass
 
+
+# --- PARCHES DE ERROR DE LOS BUCLES ---
+@vigilante_partidas.error
+async def vigilante_partidas_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE VIGILANCIA: {error}")
+
+@resumen_semanal.error
+async def resumen_semanal_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
+
+
+# --- ARRANQUE DEL BOT ---
 bot.run(TOKEN)
