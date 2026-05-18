@@ -14,6 +14,7 @@ from discord import app_commands
 
 import json
 
+
 MODOS_DISCORD = [
     app_commands.Choice(name="Competitivo (Ranked 5v5)", value="Competitive"),
     app_commands.Choice(name="Skirmish (1v1)", value="Skirmish 1v1"),
@@ -39,8 +40,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
-
-# PON AQUÍ EL ID DE TU CANAL REAL (clic derecho en el canal -> Copiar ID)
 CANAL_ALERTAS_ID = 1496883989867139102
 
 
@@ -50,6 +49,7 @@ def _bc_eb(s): return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-ExtraBold
 def _bc_b(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Bold.ttf", s)
 def _bc_m(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Medium.ttf", s)
 def _bc_r(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Regular.ttf", s)
+
 
 def _rank_palette(rank):
     r = (rank or "").lower()
@@ -69,17 +69,20 @@ def _rank_palette(rank):
             return pal
     return ((255, 70, 85), (200, 20, 40))
 
+
 def _safe_float(v, default=0.0):
     try:
         return float(v)
     except (TypeError, ValueError):
         return default
 
+
 def _safe_int(v, default=0):
     try:
         return int(v)
     except (TypeError, ValueError):
         return default
+
 
 def _calc_tracker_metrics_from_stats(s):
     lm = s.get("last_match", {}) or {}
@@ -139,6 +142,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     def soft_badge(x1, y1, x2, y2, fill, outline=None):
         draw.rounded_rectangle([x1,y1,x2,y2], radius=16, fill=fill, outline=outline, width=1)
 
+    # ── FONDO: imagen del mapa + gradiente de rango ───────────────────────────
     MAP_SPLASHES = {
         "Ascent":    "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
         "Bind":      "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-11ef-ba7ae662c694/splash.png",
@@ -153,12 +157,14 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
         "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
     }
 
+    # Extraer subdivisión del rango para ajustar opacidad del overlay
     rank_str = s.get("rank", "")
     subdivision = 1
     for part in rank_str.split():
         if part in ("1", "2", "3"):
             subdivision = int(part)
             break
+    # 1 = más oscuro/saturado, 3 = más claro/brillante
     overlay_alpha = {1: 0.82, 2: 0.74, 3: 0.66}.get(subdivision, 0.74)
 
     mapa_nombre = s.get("mapa", "")
@@ -168,6 +174,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
         try:
             mapa_img = Image.open(io.BytesIO(requests.get(map_url, timeout=6).content)).convert("RGBA")
             mapa_img = mapa_img.resize((W, H), Image.Resampling.LANCZOS)
+            # Desaturar levemente para no competir con el texto
             import PIL.ImageEnhance
             mapa_img = PIL.ImageEnhance.Color(mapa_img).enhance(0.55)
             img = mapa_img.copy()
@@ -180,6 +187,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
 
     draw = ImageDraw.Draw(img)
 
+    # Overlay gradiente del rango encima del mapa
     overlay = Image.new("RGBA", (W, H))
     od = ImageDraw.Draw(overlay)
     top_bg    = mix(acc1, (8, 10, 16), overlay_alpha)
@@ -190,6 +198,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
         od.line([(0,y),(W,y)], fill=(*c, 210), width=1)
     img = Image.alpha_composite(img.convert("RGBA"), overlay)
 
+    # Glow de esquinas
     glow = Image.new("RGBA", (W, H), (0,0,0,0))
     gd = ImageDraw.Draw(glow)
     gd.ellipse((-200,-140,360,340), fill=(*acc1,25))
@@ -197,6 +206,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     img = Image.alpha_composite(img, glow)
     draw = ImageDraw.Draw(img)
 
+    # ── HEADER ──────────────────────────────────────────────────────────────
     icon_x, icon_y, icon_size = PAD, 20, 90
     try:
         icon_url = s.get("rank_icon") or ""
@@ -229,6 +239,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     DIV1 = 132
     draw.line([(PAD,DIV1),(W-PAD,DIV1)], fill=(255,255,255,28), width=1)
 
+    # ── METRICS BAR ─────────────────────────────────────────────────────────
     wr_val = float(db_stats.get("winrate") or s.get("winrate") or 0)
     wr_col = POS if wr_val >= 50 else WARN if wr_val >= 45 else NEG
 
@@ -252,10 +263,12 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     DIV2 = MY + 74
     draw.line([(PAD,DIV2),(W-PAD,DIV2)], fill=(255,255,255,22), width=1)
 
+    # ── BODY ────────────────────────────────────────────────────────────────
     BY = DIV2 + 20
     MID = 548
     RX  = MID + 38
 
+    # ── Racha desde matches ──────────────────────────────────────────────────
     racha = 0
     racha_tipo = None
     for m in (matches or [])[:10]:
@@ -270,6 +283,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
         else:
             break
 
+    # LEFT — Resumen
     draw.text((PAD, BY), "Resumen", font=_bc_eb(28), fill=TEXT)
     played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
     draw.text((PAD, BY+34), f"{played} partidas analizadas", font=_bc_r(16), fill=MUTED)
@@ -301,6 +315,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
 
     draw.line([(MID,BY),(MID,H-PAD)], fill=(255,255,255,18), width=1)
 
+    # RIGHT — Última partida
     lm = s.get("last_match",{}) or {}
     draw.text((RX, BY), "Última partida", font=_bc_eb(28), fill=TEXT)
     result_color = POS if lm.get("won") else NEG
@@ -318,6 +333,8 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
         draw.text((ax+aw//2, ay+5), ag_last, font=_bc_m(15), fill=TEXT, anchor="ma")
 
     lm_y = BY + 102
+
+    # DDA última partida en color
     lm_dda_val = lm.get("dda")
     try:
         lm_dda_col = POS if lm_dda_val is not None and float(lm_dda_val) > 0 \
@@ -341,6 +358,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
 
     draw.line([(RX, lm_y+44),(W-PAD, lm_y+44)], fill=FAINT, width=1)
 
+    # Mapa — dentro de última partida
     mapa_y = lm_y + 54
     draw.text((RX, mapa_y),    "MAPA", font=_bc_r(13), fill=MUTED)
     draw.text((RX, mapa_y+16), s.get("mapa","?"), font=_bc_b(20), fill=TEXT)
@@ -367,6 +385,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 @bot.event
 async def on_ready():
@@ -433,6 +452,7 @@ async def on_ready():
     if not resumen_semanal.is_running():
         resumen_semanal.start()
 
+
 @tasks.loop(minutes=5)
 async def vigilante_partidas():
     await bot.wait_until_ready()
@@ -456,6 +476,7 @@ async def vigilante_partidas():
             nombre, tag = j["nombre"], j["tag"]
             s, err = await fetch_stats(nombre, tag)
             
+            # Pausa obligatoria para no saturar la API de Riot
             await asyncio.sleep(4)
             
             if err or not s or not s.get("last_match"):
@@ -480,6 +501,7 @@ async def vigilante_partidas():
                 modo_raw = (s.get("modo") or "Unrated").strip()
                 modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
                 
+                # Revisar si es la primera partida registrada ANTES de insertar
                 total_partidas = await bot.db.fetchval(
                     "SELECT COUNT(*) FROM partidas WHERE jugador_nombre = $1 AND jugador_tag = $2",
                     nombre, tag,
@@ -508,6 +530,7 @@ async def vigilante_partidas():
                     print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control. No se envía alerta.")
                     continue
 
+                # Si llegamos aquí, es una partida nueva real.
                 await _check_racha(nombre, tag, canal)
                 nuevo_rango = s.get("rank")
                 await _check_rango(nombre, tag, nuevo_rango, canal)
@@ -536,7 +559,18 @@ async def vigilante_partidas():
                 print(f"✅ Alerta de {nombre}#{tag} enviada correctamente a Discord.")
                 
         except Exception as e:
+            # Ahora si explota un jugador, el bot sigue procesando al resto.
             print(f"❌ Error procesando a {j['nombre']}#{j['tag']}: {e}")
+
+# Manejador de errores global para que el bucle no muera en silencio
+@vigilante_partidas.error
+async def vigilante_partidas_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE VIGILANCIA: {error}")
+    
+@resumen_semanal.error
+async def resumen_semanal_error(error):
+    print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
+
 
 async def fetch_stats(nombre, tag, region="eu"):
     def _request():
@@ -563,6 +597,7 @@ async def fetch_stats(nombre, tag, region="eu"):
             return None, str(e)
 
     return await asyncio.to_thread(_request)
+
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -605,6 +640,19 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     tk = sum((r["kills"] or 0) for r in filtered_rows)
     td = sum((r["deaths"] or 0) for r in filtered_rows)
     ta = sum((r["assists"] or 0) for r in filtered_rows)
+
+    db_stats = {
+        "tk": tk,
+        "td": td,
+        "ta": ta,
+        "kda": round((tk + ta) / max(td, 1), 2),
+        "acs_medio": round(sum(float(r["acs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "adr_medio": round(sum(float(r["adr"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "dda_medio": round(sum(float(r["dda"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "hs_medio": round(sum(float(r["hs"] or 0) for r in filtered_rows) / len(filtered_rows), 1),
+        "winrate": round(sum(1 for r in filtered_rows if r["won"]) * 100.0 / len(filtered_rows), 1),
+        "total_matches": len(filtered_rows),
+    }
 
     def _adr_row(r):
         return float(r["adr"] or 0)
@@ -671,6 +719,8 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     tiene_datos_db = bool(db_stats["total_matches"] > 0)
 
+    print(f"DEBUG stats keys: {list(s.keys())}")
+    print(f"DEBUG last_match keys: {list((s.get('last_match') or {}).keys())}")
     try:
         buf = await asyncio.wait_for(
             asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats, top_agents_db, filtered_rows),
@@ -686,6 +736,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     embed.set_image(url="attachment://stats.png")
     await interaction.followup.send(file=archivo, embed=embed)
 
+
 @bot.tree.command(name="add", description="Guarda a un colega en la base de datos del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
     server_id = str(interaction.guild_id)
@@ -697,6 +748,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
         await interaction.response.send_message(f"✅ Añadido a la lista de la temporada: **{nombre}#{tag}**")
     except asyncpg.exceptions.UniqueViolationError:
         await interaction.response.send_message(f"⚠️ {nombre}#{tag} ya está en la lista.")
+
 
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -772,6 +824,11 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
 
     await interaction.followup.send(embed=embed)
 
+# ─────────────────────────────────────────────
+# CHART HELPERS
+# ─────────────────────────────────────────────
+
+# ── Helpers PIL compartidos para gráficas ────────────────────────────────────
 _BG     = (10,  11, 17)
 _PANEL  = (15,  17, 25)
 _BORDER = (42,  48, 67)
@@ -810,6 +867,9 @@ def _chart_base(W, H):
 def _cheader(draw, W, PAD, title, sub=""):
     draw.text((PAD,14), title, font=_bc_eb(32), fill=(*_TEXT_G,240))
     if sub: draw.text((PAD,52), sub, font=_bc_r(18), fill=(*_MUTED_G,200))
+
+
+# ── GRÁFICA 1: Evolución ACS / DDA / HS ─────────────────────────────────────
 
 def gen_evolucion(rows, nombre_jugador):
     if not rows: return None
@@ -859,6 +919,9 @@ def gen_evolucion(rows, nombre_jugador):
                 draw.text((px_,pb+8),fechas[i] if i<len(fechas) else "",font=_bc_r(13),fill=(*_MUTED_G,160),anchor="mt")
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
+
+# ── GRÁFICA 2: Heatmap por mapa ──────────────────────────────────────────────
+
 def gen_heatmap_mapas(rows):
     ms={}
     for r in rows:
@@ -900,6 +963,9 @@ def gen_heatmap_mapas(rows):
             draw.text((cx+cw//2,ry+ROW_H//2),txt,font=_bc_b(20) if ci==0 else _bc_m(20),fill=(*(col or _TEXT_G),230),anchor="mm"); cx+=cw
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
+
+# ── GRÁFICA 3: Donut agentes ─────────────────────────────────────────────────
+
 def gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
     ags=[r["agente"] for r in agent_rows if r["agente"] not in (None,"Desconocido")]
     cts=[r["count"]  for r in agent_rows if r["agente"] not in (None,"Desconocido")]
@@ -924,22 +990,37 @@ def gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
     draw.text((CX,CY-12),str(total),font=_bc_eb(34),fill=(*_TEXT_G,240),anchor="mm")
     draw.text((CX,CY+18),"partidas",font=_bc_r(16),fill=(*_MUTED_G,200),anchor="mm")
     
+    # Área de lista derecha alineada perfectamente
     LX=CX+RO+40
-    BAR_W = 210 
+    BAR_W = 210 # Tamaño fijo y limpio para la barra horizontal
+    
     for i,(ag,cnt) in enumerate(zip(ags,cts)):
         col=CHART_COLORS[i%len(CHART_COLORS)]
-        ly=95+i*48 
+        ly=95+i*48 # Control del espaciado de filas
         if ly+24>H-PAD: break
+        
+        # 1. Cuadrado de color del agente
         _rr2(draw,LX,ly+2,LX+16,ly+18,r=4,fill=(*col,220))
+        
+        # 2. Nombre del agente (Alineado a la izquierda en el mismo eje horizontal)
         draw.text((LX+24,ly+10),ag,font=_bc_b(18),fill=(*_TEXT_G,230),anchor="lm")
+        
+        # 3. Cálculo del porcentaje exacto y renderizado de la barra de progreso
         pct = cnt/total
-        bar_start_x = LX + 130 
+        bar_start_x = LX + 130 # Eje X estático donde comienzan todas las barras
+        
+        # Fondo sutil de la barra (100%)
         draw.rounded_rectangle([bar_start_x, ly+6, bar_start_x+BAR_W, ly+14], radius=4, fill=(*col,40))
+        # Relleno real acorde al porcentaje
         w_bar = max(int(BAR_W*pct), 8)
         draw.rounded_rectangle([bar_start_x, ly+6, bar_start_x+w_bar, ly+14], radius=4, fill=(*col,200))
+        
+        # 4. Texto de porcentaje (Alineado al extremo derecho de la tarjeta)
         draw.text((W-PAD, ly+10),f"{pct*100:.0f}%",font=_bc_m(17),fill=(*_MUTED_G,200),anchor="rm")
 
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
+
+# ── GRÁFICA 4: Comparativa barras ────────────────────────────────────────────
 
 def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
     mets=["ACS","KDA","ADR","KAST %","DDA","WR %","HS %"]
@@ -951,12 +1032,15 @@ def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
         float(stats_b.get("kast_medio") or 0),float(stats_b.get("dda_medio") or 0),
         float(stats_b.get("winrate") or 0),float(stats_b.get("hs_medio") or 0)]
     
+    # Aumentamos HEAD_H a 125 para dar espacio vertical y evitar solapamientos
     n=len(mets); ROW_H=70; PAD=44; HEAD_H=125; W=1000; H=HEAD_H+n*ROW_H+PAD
     img=_chart_base(W,H); draw=ImageDraw.Draw(img)
     _cheader(draw,W,PAD,f"{nombre_a}  vs  {nombre_b}","Comparativa de métricas competitivas")
     
+    # Reducimos el espacio central muerto para que las barras sean más largas y legibles
     MID=W//2; BAR_MAX=MID-PAD-65 
     
+    # Movemos las leyendas hacia abajo (Y=82) para que nunca toquen el título principal
     _rr2(draw,MID-140,82,MID-10,106,r=4,fill=(*_TEAL,180))
     draw.text((MID-75,94),nombre_a[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
     _rr2(draw,MID+10,82,MID+140,106,r=4,fill=(*_RED_G,180))
@@ -968,15 +1052,23 @@ def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
         draw.text((MID,ry+ROW_H//2),met,font=_bc_eb(22),fill=(*_MUTED_G,200),anchor="mm")
         
         vmx=max(abs(a),abs(b),0.01)
+        
+        # Barra Jugador A (Teal / Izquierda)
         ba=max(int(BAR_MAX*abs(a)/vmx), 8) 
         _rr2(draw,MID-65-ba,ry+18,MID-65,ry+ROW_H-18,r=4,fill=(*_TEAL,200))
+        # Número dentro de la barra (color blanco para contraste)
         draw.text((MID-75,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(255,255,255,255),anchor="rm")
         
+        # Barra Jugador B (Rojo / Derecha)
         bb=max(int(BAR_MAX*abs(b)/vmx), 8)
         _rr2(draw,MID+65,ry+18,MID+65+bb,ry+ROW_H-18,r=4,fill=(*_RED_G,200))
+        # Número dentro de la barra (color blanco para contraste)
         draw.text((MID+75,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(255,255,255,255),anchor="lm")
         
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
+
+
+# ── GRÁFICA 5: Precisión HS% ─────────────────────────────────────────────────
 
 def gen_precision(rows, nombre_jugador):
     hd=[(r["fecha"].strftime("%d/%m") if hasattr(r.get("fecha",""),"strftime") else "",float(r["hs"]))
@@ -1025,6 +1117,11 @@ def gen_precision(rows, nombre_jugador):
     draw.text((lx+36,ly+38),"Media móvil",font=_bc_m(16),fill=(*_TEXT_G,220))
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
+
+# ─────────────────────────────────────────────
+# RACHA: lógica interna
+# ─────────────────────────────────────────────
+
 async def _check_racha(nombre, tag, canal):
     ultimas = await bot.db.fetch(
         """
@@ -1045,6 +1142,11 @@ async def _check_racha(nombre, tag, canal):
         await canal.send(
             f"💀 **{nombre}#{tag} lleva 3 derrotas seguidas.** Alguien que le diga que respire. 🫂"
         )
+
+
+# ─────────────────────────────────────────────
+# ALERTA DE RANGO: guardamos rango en jugadores
+# ─────────────────────────────────────────────
 
 async def _check_rango(nombre, tag, nuevo_rango, canal):
     row = await bot.db.fetchrow(
@@ -1078,6 +1180,11 @@ async def _check_rango(nombre, tag, nuevo_rango, canal):
         "UPDATE jugadores SET ultimo_rango = $1 WHERE nombre = $2 AND tag = $3",
         nuevo_rango, nombre, tag,
     )
+
+
+# ─────────────────────────────────────────────
+# RESUMEN SEMANAL AUTOMÁTICO
+# ─────────────────────────────────────────────
 
 @tasks.loop(hours=1)
 async def resumen_semanal():
@@ -1135,6 +1242,11 @@ async def resumen_semanal():
             )
         await canal.send(embed=embed)
 
+
+# ─────────────────────────────────────────────
+# NUEVOS COMANDOS v1.0.1
+# ─────────────────────────────────────────────
+
 @bot.tree.command(name="sync", description="Sincroniza los slash commands en este servidor")
 async def sync_cmd(interaction: discord.Interaction):
     synced = await bot.tree.sync(guild=discord.Object(id=interaction.guild_id))
@@ -1151,6 +1263,7 @@ async def remove(interaction: discord.Interaction, nombre: str, tag: str):
         await interaction.response.send_message(f"🗑️ **{nombre}#{tag}** eliminado de la vigilancia de este servidor.")
     else:
         await interaction.response.send_message(f"⚠️ No encontré a **{nombre}#{tag}** en la lista de este servidor.")
+
 
 @bot.tree.command(name="graficas", description="Muestra gráficas de evolución, precisión y mapas de un jugador")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -1211,6 +1324,7 @@ async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo
     )
     await interaction.followup.send(embed=embed, files=archivos)
 
+
 @bot.tree.command(name="comparar", description="Compara las stats competitivas de dos jugadores del servidor")
 async def comparar(
     interaction: discord.Interaction,
@@ -1265,6 +1379,7 @@ async def comparar(
     embed.set_image(url="attachment://comparar.png")
     await interaction.followup.send(file=archivo, embed=embed)
 
+# Función para filtrar los agentes dinámicamente mientras el usuario escribe
 async def agente_autocomplete(
     interaction: discord.Interaction,
     current: str,
@@ -1273,14 +1388,16 @@ async def agente_autocomplete(
         app_commands.Choice(name=agente, value=agente)
         for agente in AGENTES_VALORANT if current.lower() in agente.lower()
     ]
+    # Discord solo permite devolver un máximo de 25 opciones a la vez
     return coincidencias[:25]
 
 @bot.tree.command(name="lineups", description="Muestra lineups de un agente")
 @app_commands.describe(agente="Nombre del agente")
-@app_commands.autocomplete(agente=agente_autocomplete)
+@app_commands.autocomplete(agente=agente_autocomplete) # Enganchamos el autocompletado aquí
 async def lineups(interaction: discord.Interaction, agente: str):
     await interaction.response.defer()
     
+    # Generamos la URL y el Embed
     url = f"{LINEUPS_BASE}{urllib.parse.quote(agente)}"
     embed = discord.Embed(
         title=f"📚 Lineups de {agente}",
@@ -1289,6 +1406,7 @@ async def lineups(interaction: discord.Interaction, agente: str):
     )
     
     await interaction.followup.send(embed=embed)
+
 
 @bot.tree.command(name="temporada", description="Resumen competitivo de la temporada del servidor")
 async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
@@ -1367,6 +1485,12 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
 
     await interaction.followup.send(embed=embed, files=archivos)
 
+
+# ─────────────────────────────────────────────
+# PATCH on_ready: arrancar resumen_semanal
+# ─────────────────────────────────────────────
+
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     logging.exception("Slash command error", exc_info=error)
@@ -1380,6 +1504,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         pass
 
 
+# --- PARCHES DE ERROR DE LOS BUCLES ---
 @vigilante_partidas.error
 async def vigilante_partidas_error(error):
     print(f"💥 CRASH EN EL BUCLE DE VIGILANCIA: {error}")
@@ -1388,4 +1513,6 @@ async def vigilante_partidas_error(error):
 async def resumen_semanal_error(error):
     print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
 
+
+# --- ARRANQUE DEL BOT ---
 bot.run(TOKEN)
