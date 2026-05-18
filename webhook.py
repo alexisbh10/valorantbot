@@ -458,6 +458,7 @@ async def admin_update_jugador(jugador_id: int, req: Request, secret: str = ""):
         "UPDATE jugadores SET nombre=$1, tag=$2, ultimo_rango=$3 WHERE id=$4",
         b["nombre"], b["tag"], b.get("ultimo_rango"), jugador_id
     )
+
     return {"ok": True}
 
 @app.get("/admin/partidas")

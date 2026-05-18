@@ -567,6 +567,13 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     s["mapa"] = latest["mapa"] or s.get("mapa")
     s["modo"] = latest["modo"] or s.get("modo")
     s["kda"] = db_stats["kda"]
+    s["kda"]     = db_stats["kda"]
+    s["adr"]     = db_stats["adr_medio"]      # ← añadir
+    s["acs"]     = db_stats["acs_medio"]      # ← añadir
+    s["hs"]      = db_stats["hs_medio"]       # ← añadir
+    s["winrate"] = db_stats["winrate"]        # ← añadir
+    s["dda"]     = db_stats["dda_medio"]      # ← añadir
+    s["kast"]    = db_stats.get("kast_medio") # ← añadir
     s["last_match"] = {
         "id": latest["match_id"],
         "kills": latest["kills"] or 0,
