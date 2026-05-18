@@ -73,7 +73,12 @@ def extract_tracker_like_match_metrics(match, player):
     try:
         stats         = player.get("stats", {}) or {}
         metadata      = match.get("metadata", {}) or {}
-        rounds_played = metadata.get("rounds_played", 0) or 0
+        rounds_played = (
+            metadata.get("rounds_played") or
+            metadata.get("rounds") or
+            len(match.get("rounds", [])) or  
+            0
+        )
         score         = stats.get("score", 0) or 0
 
         puuid  = player.get("puuid", "") or ""
@@ -85,6 +90,9 @@ def extract_tracker_like_match_metrics(match, player):
 
         all_rounds = match.get("rounds") or []
 
+        if all_rounds:
+            rounds_played = len(all_rounds)
+            
         for rnd in all_rounds:
             player_stats = rnd.get("player_stats") or []
 
