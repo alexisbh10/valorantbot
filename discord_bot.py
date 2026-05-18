@@ -1347,16 +1347,32 @@ async def comparar(
     embed.set_image(url="attachment://comparar.png")
     await interaction.followup.send(file=archivo, embed=embed)
 
+# Función para filtrar los agentes dinámicamente mientras el usuario escribe
+async def agente_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    coincidencias = [
+        app_commands.Choice(name=agente, value=agente)
+        for agente in AGENTES_VALORANT if current.lower() in agente.lower()
+    ]
+    # Discord solo permite devolver un máximo de 25 opciones a la vez
+    return coincidencias[:25]
+
 @bot.tree.command(name="lineups", description="Muestra lineups de un agente")
 @app_commands.describe(agente="Nombre del agente")
+@app_commands.autocomplete(agente=agente_autocomplete) # Enganchamos el autocompletado aquí
 async def lineups(interaction: discord.Interaction, agente: str):
     await interaction.response.defer()
+    
+    # Generamos la URL y el Embed
     url = f"{LINEUPS_BASE}{urllib.parse.quote(agente)}"
     embed = discord.Embed(
         title=f"📚 Lineups de {agente}",
-        description=f"[Abrir lineups]({url})",
+        description=f"Haz clic aquí para [abrir los lineups de {agente}]({url})",
         color=0x4fd1c5,
     )
+    
     await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="temporada", description="Resumen competitivo de la temporada del servidor")
