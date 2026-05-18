@@ -113,7 +113,7 @@ def fmt_num(v, digits=1, suffix=""):
     try: return f"{round(float(v), digits)}{suffix}"
     except: return f"{v}{suffix}"
 
-def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
+def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, matches=None):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
     W, H = 1180, 680
     PAD = 44
@@ -131,19 +131,67 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     def soft_badge(x1, y1, x2, y2, fill, outline=None):
         draw.rounded_rectangle([x1,y1,x2,y2], radius=16, fill=fill, outline=outline, width=1)
 
-    img = Image.new("RGBA", (W, H))
+    # ── FONDO: imagen del mapa + gradiente de rango ───────────────────────────
+    MAP_SPLASHES = {
+        "Ascent":    "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
+        "Bind":      "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-11ef-ba7ae662c694/splash.png",
+        "Haven":     "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7825631b7aa5/splash.png",
+        "Split":     "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/splash.png",
+        "Fracture":  "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/splash.png",
+        "Breeze":    "https://media.valorant-api.com/maps/2fb9a4fd-47a7-3e68-9c03-d38d1b7caabd/splash.png",
+        "Icebox":    "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
+        "Pearl":     "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/splash.png",
+        "Lotus":     "https://media.valorant-api.com/maps/2fe4ed3a-450a-01be-2339-95a5b1ac8d53/splash.png",
+        "Sunset":    "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
+        "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
+    }
+
+    # Extraer subdivisión del rango para ajustar opacidad del overlay
+    rank_str = s.get("rank", "")
+    subdivision = 1
+    for part in rank_str.split():
+        if part in ("1", "2", "3"):
+            subdivision = int(part)
+            break
+    # 1 = más oscuro/saturado, 3 = más claro/brillante
+    overlay_alpha = {1: 0.82, 2: 0.74, 3: 0.66}.get(subdivision, 0.74)
+
+    mapa_nombre = s.get("mapa", "")
+    map_url = MAP_SPLASHES.get(mapa_nombre)
+    fondo_ok = False
+    if map_url:
+        try:
+            mapa_img = Image.open(io.BytesIO(requests.get(map_url, timeout=6).content)).convert("RGBA")
+            mapa_img = mapa_img.resize((W, H), Image.Resampling.LANCZOS)
+            # Desaturar levemente para no competir con el texto
+            import PIL.ImageEnhance
+            mapa_img = PIL.ImageEnhance.Color(mapa_img).enhance(0.55)
+            img = mapa_img.copy()
+            fondo_ok = True
+        except:
+            pass
+
+    if not fondo_ok:
+        img = Image.new("RGBA", (W, H))
+
     draw = ImageDraw.Draw(img)
-    top_bg    = mix(acc1, (8, 10, 16), 0.72)
-    bottom_bg = mix(acc2, (3, 4, 8),  0.88)
+
+    # Overlay gradiente del rango encima del mapa
+    overlay = Image.new("RGBA", (W, H))
+    od = ImageDraw.Draw(overlay)
+    top_bg    = mix(acc1, (8, 10, 16), overlay_alpha)
+    bottom_bg = mix(acc2, (3, 4, 8),  overlay_alpha + 0.06)
     for y in range(H):
         t = y / max(H-1, 1)
         c = mix(top_bg, bottom_bg, t)
-        draw.line([(0,y),(W,y)], fill=(*c,255), width=1)
+        od.line([(0,y),(W,y)], fill=(*c, 210), width=1)
+    img = Image.alpha_composite(img.convert("RGBA"), overlay)
 
+    # Glow de esquinas
     glow = Image.new("RGBA", (W, H), (0,0,0,0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse((-200,-140,360,340), fill=(*acc1,30))
-    gd.ellipse((W-360,H-300,W+100,H+100), fill=(*acc2,24))
+    gd.ellipse((-200,-140,360,340), fill=(*acc1,25))
+    gd.ellipse((W-360,H-300,W+100,H+100), fill=(*acc2,20))
     img = Image.alpha_composite(img, glow)
     draw = ImageDraw.Draw(img)
 
@@ -185,11 +233,11 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     wr_col = POS if wr_val >= 50 else WARN if wr_val >= 45 else NEG
 
     metrics = [
-        ("KDA", fmt_num(db_stats.get("kda") if tiene_datos_db else s.get("kda"), 2),       None,   True),
-        ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None,   False),
-        ("HS",  fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None, False),
-        ("WR",  fmt_num(wr_val, 1, "%"),                                                    wr_col, False),
-        ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None,   False),
+        ("KDA", fmt_num(db_stats.get("kda") if tiene_datos_db else s.get("kda"), 2),          None,   True),
+        ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1),    None,   False),
+        ("HS",  fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None,   False),
+        ("WR",  fmt_num(wr_val, 1, "%"),                                                       wr_col, False),
+        ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1),    None,   False),
     ]
 
     MY = DIV1 + 12
@@ -209,9 +257,24 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     MID = 548
     RX  = MID + 38
 
+    # ── Racha desde matches ──────────────────────────────────────────────────
+    racha = 0
+    racha_tipo = None
+    for m in (matches or [])[:10]:
+        resultado = m.get("won")
+        if resultado is None:
+            continue
+        tipo = "W" if resultado else "L"
+        if racha_tipo is None:
+            racha_tipo = tipo
+        if tipo == racha_tipo:
+            racha += 1
+        else:
+            break
+
     # LEFT — Resumen
     draw.text((PAD, BY), "Resumen", font=_bc_eb(28), fill=TEXT)
-    played = db_stats.get("total_matches",0) if tiene_datos_db else 0
+    played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
     draw.text((PAD, BY+34), f"{played} partidas analizadas", font=_bc_r(16), fill=MUTED)
 
     dda_val = db_stats.get("dda_medio") if tiene_datos_db else None
@@ -224,8 +287,13 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         ("KAST",             fmt_num(db_stats.get("kast_medio"),1,"%") if tiene_datos_db else "—", TEXT),
         ("DDA",              fmt_num(dda_val,1) if tiene_datos_db else "—",                        dda_col),
         ("Agente principal", (db_stats.get("main_agent") or s.get("agent") or "?") if tiene_datos_db else "—", TEXT),
-        ("Mapa",             s.get("mapa","?"),                                                    TEXT),
     ]
+
+    if racha_tipo and racha > 0:
+        racha_col = POS if racha_tipo == "W" else NEG
+        racha_txt = f"▲ {racha} VICTORIA{'S' if racha > 1 else ''}" if racha_tipo == "W" else f"▼ {racha} DERROTA{'S' if racha > 1 else ''}"
+        resumen.append(("RACHA ACTUAL", racha_txt, racha_col))
+
     row_h = 58
     for idx, (lab, val, col) in enumerate(resumen):
         ry = BY + 80 + idx * row_h
@@ -254,22 +322,39 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         draw.text((ax+aw//2, ay+5), ag_last, font=_bc_m(15), fill=TEXT, anchor="ma")
 
     lm_y = BY + 102
+
+    # DDA última partida en color
+    lm_dda_val = lm.get("dda")
+    try:
+        lm_dda_col = POS if lm_dda_val is not None and float(lm_dda_val) > 0 \
+                     else NEG if lm_dda_val is not None and float(lm_dda_val) < 0 \
+                     else TEXT
+    except:
+        lm_dda_col = TEXT
+
     lm_metrics = [
-        ("ACS",  fmt_num(lm.get("acs"),1)),
-        ("HS",   fmt_num(lm.get("hs"),1,"%")),
-        ("ADR",  fmt_num(lm.get("adr"),1)),
-        ("KAST", fmt_num(lm.get("kast"),1,"%")),
-        ("DDA",  fmt_num(lm.get("dda"),1)),
+        ("ACS",  fmt_num(lm.get("acs"),1),      TEXT),
+        ("HS",   fmt_num(lm.get("hs"),1,"%"),    TEXT),
+        ("ADR",  fmt_num(lm.get("adr"),1),       TEXT),
+        ("KAST", fmt_num(lm.get("kast"),1,"%"),  TEXT),
+        ("DDA",  fmt_num(lm_dda_val,1),          lm_dda_col),
     ]
     lm_col_w = (W - PAD - RX) // len(lm_metrics)
-    for i,(lab,val) in enumerate(lm_metrics):
+    for i,(lab,val,col) in enumerate(lm_metrics):
         lx = RX + i * lm_col_w
         draw.text((lx, lm_y),    lab, font=_bc_r(13), fill=MUTED)
-        draw.text((lx, lm_y+16), val, font=_bc_b(20), fill=TEXT)
+        draw.text((lx, lm_y+16), val, font=_bc_b(20), fill=col)
 
     draw.line([(RX, lm_y+44),(W-PAD, lm_y+44)], fill=FAINT, width=1)
 
-    asy = lm_y + 56
+    # Mapa — dentro de última partida
+    mapa_y = lm_y + 54
+    draw.text((RX, mapa_y),    "MAPA", font=_bc_r(13), fill=MUTED)
+    draw.text((RX, mapa_y+16), s.get("mapa","?"), font=_bc_b(20), fill=TEXT)
+
+    draw.line([(RX, mapa_y+44),(W-PAD, mapa_y+44)], fill=FAINT, width=1)
+
+    asy = mapa_y + 56
     draw.text((RX, asy), "Agentes más usados", font=_bc_eb(22), fill=TEXT)
 
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
@@ -593,8 +678,8 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     try:
         buf = await asyncio.wait_for(
-            asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats, top_agents_db),
-            timeout=20,
+            asyncio.to_thread(generar_tarjeta, s, modo_display, tiene_datos_db, db_stats, top_agents_db, filtered_rows),
+            timeout=20
         )
         archivo = discord.File(fp=buf, filename="stats.png")
     except Exception as e:
