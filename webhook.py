@@ -7,8 +7,16 @@ from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
 import datetime
 import asyncpg
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
 cache = {}
