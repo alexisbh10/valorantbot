@@ -195,12 +195,7 @@ def analyze_matches(matches, puuid, username, tag):
     total_matches = 0
     total_kast_rounds = 0
     has_kast_data = False
-    
-    if match_metrics["damage_dealt_total"] is not None:
-                damage += match_metrics["damage_dealt_total"]
-    if match_metrics["damage_received_total"] is not None:
-        damage_received += match_metrics["damage_received_total"]
-    
+
     for m in matches[:10]:
         try:
             players = m.get("players", {}).get("all_players", [])
@@ -220,6 +215,7 @@ def analyze_matches(matches, puuid, username, tag):
             bs = stats.get("bodyshots", 0) or 0
             ls = stats.get("legshots", 0)  or 0
 
+            # ¡ESTA ES LA LÍNEA QUE SE HABÍA BORRADO!
             match_metrics = extract_tracker_like_match_metrics(m, player)
             r = match_metrics["rounds_played"] or 0
 
@@ -229,8 +225,13 @@ def analyze_matches(matches, puuid, username, tag):
             headshots += hs
             bodyshots += bs
             legshots  += ls
-            damage          += match_metrics["damage_dealt_total"]
-            damage_received += match_metrics["damage_received_total"]
+            
+            # Sumamos el daño de forma segura
+            if match_metrics["damage_dealt_total"] is not None:
+                damage += match_metrics["damage_dealt_total"]
+            if match_metrics["damage_received_total"] is not None:
+                damage_received += match_metrics["damage_received_total"]
+                
             rounds += r
             score  += (stats.get("score", 0) or 0)
             kdas_history.append((k + a) / max(d, 1))
@@ -276,7 +277,7 @@ def analyze_matches(matches, puuid, username, tag):
         "kda":     round((kills + assists) / max(deaths, 1), 2),
         "winrate": round((wins / total_matches) * 100, 1),
         "trend":   trend,
-        "hs":      round((headshots / max(total_shots, 1)) * 100, 1),
+        "hs":      round((headshots / max(total_shots, 1)) * 100, 1) if total_shots else 0,
         "adr":     round(damage / max(rounds, 1), 2) if rounds else 0,
         "acs":     round(score  / max(rounds, 1), 1) if rounds else 0,
         "kast":    round((total_kast_rounds / rounds) * 100, 2) if (has_kast_data and rounds) else None,
