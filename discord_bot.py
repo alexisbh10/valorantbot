@@ -90,15 +90,15 @@ def _calc_tracker_metrics_from_stats(s):
 
     _adr_raw = s.get("adr") or lm.get("adr")
     adr = round(damage_dealt_total / rounds_played, 2) if rounds_played > 0 and damage_dealt_total > 0 else \
-        round(safe_float(_adr_raw), 2) if _adr_raw is not None and safe_float(_adr_raw) > 0 else None
+        round(_safe_float(_adr_raw), 2) if _adr_raw is not None and _safe_float(_adr_raw) > 0 else None
 
     _dda_raw = s.get("damage_delta") or s.get("dda") or lm.get("damage_delta") or lm.get("dda")
     dda = round((damage_dealt_total - damage_received_total) / rounds_played, 2) if rounds_played > 0 and (damage_dealt_total or damage_received_total) else \
-        round(safe_float(_dda_raw), 2) if _dda_raw is not None else None
+        round(_safe_float(_dda_raw), 2) if _dda_raw is not None else None
 
     _kast_raw = s.get("kast") or lm.get("kast")
     kast = round((kast_rounds / rounds_played) * 100, 2) if rounds_played > 0 and kast_rounds > 0 else \
-        round(safe_float(_kast_raw), 2) if _kast_raw is not None and safe_float(_kast_raw) > 0 else None
+        round(_safe_float(_kast_raw), 2) if _kast_raw is not None and _safe_float(_kast_raw) > 0 else None
     hs_raw = lm.get("hs") if lm.get("hs") is not None else s.get("hs")
     hs_value = round(_safe_float(hs_raw), 2) if hs_raw is not None else None
 
@@ -1171,15 +1171,6 @@ async def resumen_semanal():
 
 
 # ─────────────────────────────────────────────
-# PATCH VIGILANTE: añadir racha + rango check
-# ─────────────────────────────────────────────
-
-# El vigilante ya está definido arriba; aquí extendemos on_ready para arrancar resumen_semanal
-
-_old_on_ready = bot.extra_events.get("on_ready", [])
-
-
-# ─────────────────────────────────────────────
 # NUEVOS COMANDOS v1.0.1
 # ─────────────────────────────────────────────
 
@@ -1227,10 +1218,10 @@ async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo
 
     archivos = []
 
-    buf_evol = await asyncio.to_thread(_gen_evolucion, rows, f"{nombre}#{tag}")
+    buf_evol = await asyncio.to_thread(gen_evolucion, rows, f"{nombre}#{tag}")
     archivos.append(discord.File(fp=buf_evol, filename="evolucion.png"))
 
-    buf_hm = await asyncio.to_thread(_gen_heatmap_mapas, rows)
+    buf_hm = await asyncio.to_thread(gen_heatmap_mapas, rows)
     if buf_hm:
         archivos.append(discord.File(fp=buf_hm, filename="mapas.png"))
 
@@ -1244,12 +1235,12 @@ async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo
         """,
         server_id, nombre, tag, modo_busqueda,
     )
-    buf_pie = await asyncio.to_thread(_gen_pie_agentes, agent_rows, f"Agentes — {nombre}#{tag}")
+    buf_pie = await asyncio.to_thread(gen_pie_agentes, agent_rows, f"Agentes — {nombre}#{tag}")
     if buf_pie:
         archivos.append(discord.File(fp=buf_pie, filename="agentes.png"))
 
     if modo_busqueda == "Competitive":
-        buf_prec = await asyncio.to_thread(_gen_precision, rows, f"{nombre}#{tag}")
+        buf_prec = await asyncio.to_thread(gen_precision, rows, f"{nombre}#{tag}")
         if buf_prec:
             archivos.append(discord.File(fp=buf_prec, filename="precision.png"))
 
@@ -1302,7 +1293,7 @@ async def comparar(
         await interaction.followup.send(f"❌ No hay datos para **{nombre2}#{tag2}**.")
         return
 
-    buf = await asyncio.to_thread(_gen_barra_comparativa, dict(s1), f"{nombre1}#{tag1}", dict(s2), f"{nombre2}#{tag2}")
+    buf = await asyncio.to_thread(gen_barra_comparativa, dict(s1), f"{nombre1}#{tag1}", dict(s2), f"{nombre2}#{tag2}")
     archivo = discord.File(fp=buf, filename="comparar.png")
 
     def fmt(v, suf=""):
@@ -1373,7 +1364,7 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
         server_id, modo_busqueda,
     )
 
-    buf_pie = await asyncio.to_thread(_gen_pie_agentes, agent_rows_all, f"Agentes más jugados — {modo_display}")
+    buf_pie = await asyncio.to_thread(gen_pie_agentes, agent_rows_all, f"Agentes más jugados — {modo_display}")
 
     embed = discord.Embed(
         title=f"🏆 Temporada — {modo_display}",
