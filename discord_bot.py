@@ -88,9 +88,17 @@ def _calc_tracker_metrics_from_stats(s):
     damage_received_total = _safe_int(s.get("damage_received_total") or s.get("damage_received") or lm.get("damage_received_total") or lm.get("damage_received"))
     kast_rounds = _safe_int(s.get("kast_rounds") or lm.get("kast_rounds"))
 
-    adr = round(damage_dealt_total / rounds_played, 2) if rounds_played > 0 and damage_dealt_total > 0 else (round(_safe_float(s.get("adr") or lm.get("adr")), 2) if (s.get("adr") is not None or lm.get("adr") is not None) else None)
-    dda = round((damage_dealt_total - damage_received_total) / rounds_played, 2) if rounds_played > 0 and (damage_dealt_total or damage_received_total) else (round(_safe_float(s.get("damage_delta") or s.get("dda") or lm.get("damage_delta") or lm.get("dda")), 2) if (s.get("damage_delta") is not None or s.get("dda") is not None or lm.get("damage_delta") is not None or lm.get("dda") is not None) else None)
-    kast = round((kast_rounds / rounds_played) * 100, 2) if rounds_played > 0 and kast_rounds > 0 else (round(_safe_float(s.get("kast") or lm.get("kast")), 2) if (s.get("kast") is not None or lm.get("kast") is not None) else None)
+    _adr_raw = s.get("adr") or lm.get("adr")
+    adr = round(damage_dealt_total / rounds_played, 2) if rounds_played > 0 and damage_dealt_total > 0 else \
+        round(safe_float(_adr_raw), 2) if _adr_raw is not None and safe_float(_adr_raw) > 0 else None
+
+    _dda_raw = s.get("damage_delta") or s.get("dda") or lm.get("damage_delta") or lm.get("dda")
+    dda = round((damage_dealt_total - damage_received_total) / rounds_played, 2) if rounds_played > 0 and (damage_dealt_total or damage_received_total) else \
+        round(safe_float(_dda_raw), 2) if _dda_raw is not None else None
+
+    _kast_raw = s.get("kast") or lm.get("kast")
+    kast = round((kast_rounds / rounds_played) * 100, 2) if rounds_played > 0 and kast_rounds > 0 else \
+        round(safe_float(_kast_raw), 2) if _kast_raw is not None and safe_float(_kast_raw) > 0 else None
     hs_raw = lm.get("hs") if lm.get("hs") is not None else s.get("hs")
     hs_value = round(_safe_float(hs_raw), 2) if hs_raw is not None else None
 
