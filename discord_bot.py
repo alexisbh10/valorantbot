@@ -523,18 +523,12 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     }
 
     def _adr_row(r):
-        if r["damage_dealt_total"] and r["rounds_played"]:
-            return float(r["damage_dealt_total"]) / max(int(r["rounds_played"]), 1)
         return float(r["adr"] or 0)
 
     def _dda_row(r):
-        if r["damage_dealt_total"] and r["damage_received_total"] and r["rounds_played"]:
-            return (float(r["damage_dealt_total"]) - float(r["damage_received_total"])) / max(int(r["rounds_played"]), 1)
         return float(r["dda"] or 0)
 
     def _kast_row(r):
-        if r["kast_rounds"] is not None and r["rounds_played"]:
-            return float(r["kast_rounds"]) * 100.0 / max(int(r["rounds_played"]), 1)
         if r["kast"] is not None:
             return float(r["kast"])
         return None
