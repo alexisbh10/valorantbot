@@ -73,14 +73,11 @@ def extract_tracker_like_match_metrics(match, player):
     try:
         stats         = player.get("stats", {}) or {}
         metadata      = match.get("metadata", {}) or {}
-        rounds_played = (
-            metadata.get("rounds_played") or
-            metadata.get("rounds") or
-            len(match.get("rounds", [])) or  
-            0
-        )
+        all_rounds    = match.get("rounds") or []
+        
+        rounds_played = metadata.get("rounds_played") or metadata.get("rounds") or len(all_rounds) or 1
         score         = stats.get("score", 0) or 0
-
+        
         puuid  = player.get("puuid", "") or ""
         p_name = player.get("name", "").lower()
 
@@ -88,15 +85,9 @@ def extract_tracker_like_match_metrics(match, player):
         damage_received_total = 0
         kast_rounds           = 0
 
-        all_rounds = match.get("rounds") or []
-
-        if all_rounds:
-            rounds_played = len(all_rounds)
-            
         for rnd in all_rounds:
             player_stats = rnd.get("player_stats") or []
 
-            # Localizar el entry de nuestro jugador en esta ronda
             my_ps = None
             for ps in player_stats:
                 ps_puuid = ps.get("player_puuid", "") or ""
@@ -112,25 +103,25 @@ def extract_tracker_like_match_metrics(match, player):
             if my_ps is None:
                 continue
 
-            # ADR: daño hecho por nuestro jugador
-            for dmg in (my_ps.get("damage") or []):
+            # ADR: La API usa damage_events
+            for dmg in (my_ps.get("damage_events") or []):
                 damage_dealt_total += int(dmg.get("damage", 0) or 0)
 
-            # DDA: daño recibido — sumar donde receiver_puuid == nuestro puuid
+            # DDA: La API usa damage_events
             for ps in player_stats:
                 ps_puuid_other = ps.get("player_puuid", "") or ""
                 if puuid and ps_puuid_other == puuid:
                     continue
-                for dmg in (ps.get("damage") or []):
+                for dmg in (ps.get("damage_events") or []):
                     receiver = dmg.get("receiver_puuid", "") or ""
                     if puuid and receiver == puuid:
                         damage_received_total += int(dmg.get("damage", 0) or 0)
 
             # KAST
-            my_kills   = my_ps.get("kills") or []
-            my_assists = my_ps.get("assists") or []
-            had_kill   = len(my_kills) > 0
-            had_assist = len(my_assists) > 0
+            my_kills   = my_ps.get("kills", 0)
+            my_assists = my_ps.get("assists", 0)
+            had_kill   = my_kills > 0
+            had_assist = my_assists > 0
 
             died_this_round = False
             my_death_time   = None
@@ -140,7 +131,8 @@ def extract_tracker_like_match_metrics(match, player):
                 ps_puuid_other = ps.get("player_puuid", "") or ""
                 if puuid and ps_puuid_other == puuid:
                     continue
-                for kill in (ps.get("kills") or []):
+                # La API usa kill_events para el array de kills
+                for kill in (ps.get("kill_events") or []):
                     if (kill.get("victim_puuid", "") or "") == puuid:
                         died_this_round = True
                         my_death_time   = kill.get("kill_time_in_round")
@@ -151,7 +143,7 @@ def extract_tracker_like_match_metrics(match, player):
             traded = False
             if died_this_round and my_death_time is not None and killer_puuid:
                 for ps in player_stats:
-                    for kill in (ps.get("kills") or []):
+                    for kill in (ps.get("kill_events") or []):
                         if (kill.get("victim_puuid", "") or "") == killer_puuid:
                             trade_time = kill.get("kill_time_in_round")
                             if trade_time is not None and 0 <= (trade_time - my_death_time) <= 5000:
@@ -160,16 +152,18 @@ def extract_tracker_like_match_metrics(match, player):
             if had_kill or had_assist or survived or traded:
                 kast_rounds += 1
 
-        adr  = round(damage_dealt_total / max(rounds_played, 1), 2) if rounds_played else 0
-        dda  = round((damage_dealt_total - damage_received_total) / max(rounds_played, 1), 2) if rounds_played else 0
-        kast = round((kast_rounds / max(rounds_played, 1)) * 100, 2) if rounds_played else None
-        acs  = round(score / max(rounds_played, 1), 1) if rounds_played else 0
+        has_round_data = len(all_rounds) > 0
+        
+        adr  = round(damage_dealt_total / rounds_played, 2) if has_round_data else None
+        dda  = round((damage_dealt_total - damage_received_total) / rounds_played, 2) if has_round_data else None
+        kast = round((kast_rounds / rounds_played) * 100, 2) if has_round_data else None
+        acs  = round(score / rounds_played, 1) if rounds_played else 0
 
         return {
             "rounds_played":         rounds_played,
-            "damage_dealt_total":    damage_dealt_total,
-            "damage_received_total": damage_received_total,
-            "kast_rounds":           kast_rounds,
+            "damage_dealt_total":    damage_dealt_total if has_round_data else None,
+            "damage_received_total": damage_received_total if has_round_data else None,
+            "kast_rounds":           kast_rounds if has_round_data else None,
             "adr":                   adr,
             "dda":                   dda,
             "kast":                  kast,
@@ -179,9 +173,9 @@ def extract_tracker_like_match_metrics(match, player):
     except Exception as e:
         print(f"[extract_metrics ERROR] {e}\n{traceback.format_exc()}")
         return {
-            "rounds_played": 0, "damage_dealt_total": 0,
-            "damage_received_total": 0, "kast_rounds": 0,
-            "adr": 0, "dda": 0, "kast": None, "acs": 0,
+            "rounds_played": 1, "damage_dealt_total": None,
+            "damage_received_total": None, "kast_rounds": None,
+            "adr": None, "dda": None, "kast": None, "acs": 0,
         }
 
 def analyze_matches(matches, puuid, username, tag):
@@ -201,7 +195,12 @@ def analyze_matches(matches, puuid, username, tag):
     total_matches = 0
     total_kast_rounds = 0
     has_kast_data = False
-
+    
+    if match_metrics["damage_dealt_total"] is not None:
+                damage += match_metrics["damage_dealt_total"]
+    if match_metrics["damage_received_total"] is not None:
+        damage_received += match_metrics["damage_received_total"]
+    
     for m in matches[:10]:
         try:
             players = m.get("players", {}).get("all_players", [])

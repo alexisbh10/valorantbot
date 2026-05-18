@@ -958,23 +958,23 @@ def gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
     draw.text((CX,CY-12),str(total),font=_bc_eb(34),fill=(*_TEXT_G,240),anchor="mm")
     draw.text((CX,CY+18),"partidas",font=_bc_r(16),fill=(*_MUTED_G,200),anchor="mm")
     LX=CX+RO+40
-    BAR_W = W-PAD-LX-28-52  # ancho disponible para la barra
+    BAR_W = W-PAD-LX-28-52  
     for i,(ag,cnt) in enumerate(zip(ags,cts)):
         col=CHART_COLORS[i%len(CHART_COLORS)]; ly=90+i*46
         if ly+36>H-PAD: break
-        # cuadrado color
         _rr2(draw,LX,ly,LX+18,ly+18,r=4,fill=(*col,220))
-        # nombre agente
         draw.text((LX+28,ly+2),ag,font=_bc_b(18),fill=(*_TEXT_G,230),anchor="lm")
-        # barra de progreso
         pct = cnt/total
         bar_full_x = LX+28
         bar_y = ly+24
         draw.rounded_rectangle([bar_full_x, bar_y, bar_full_x+BAR_W, bar_y+7], radius=3, fill=(*col,40))
-        draw.rounded_rectangle([bar_full_x, bar_y, bar_full_x+int(BAR_W*pct), bar_y+7], radius=3, fill=(*col,200))
-        # porcentaje
+        
+        # Evitar crash limitando el mínimo ancho al doble del radio (3*2 = 6)
+        w_bar = max(int(BAR_W*pct), 6)
+        draw.rounded_rectangle([bar_full_x, bar_y, bar_full_x+w_bar, bar_y+7], radius=3, fill=(*col,200))
         draw.text((W-PAD, ly+9),f"{pct*100:.0f}%",font=_bc_r(17),fill=(*_MUTED_G,190),anchor="rm")
-
+    
+    buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 # ── GRÁFICA 4: Comparativa barras ────────────────────────────────────────────
 
@@ -995,17 +995,24 @@ def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
     draw.text((MID-70,24),nombre_a[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
     _rr2(draw,MID+10,12,MID+130,36,r=4,fill=(*_RED_G,180))
     draw.text((MID+70,24),nombre_b[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
+    
     for i,(met,a,b) in enumerate(zip(mets,va,vb)):
         ry=HEAD_H+i*ROW_H
         if i%2==0: _rr2(draw,PAD,ry+4,W-PAD,ry+ROW_H-4,r=6,fill=(*_PANEL,140))
         draw.text((MID,ry+ROW_H//2),met,font=_bc_eb(22),fill=(*_MUTED_G,200),anchor="mm")
         vmx=max(abs(a),abs(b),0.01)
-        ba=int(BAR_MAX*abs(a)/vmx); ca=_TEAL if a>=b else _RED_G
+        
+        # Limitado a 8 para evitar crash por radio (r=4). Color blanco 255 y ancla cambiada para ir por dentro.
+        ba=max(int(BAR_MAX*abs(a)/vmx), 8) 
+        ca=_TEAL if a>=b else _RED_G
         _rr2(draw,MID-90-ba,ry+18,MID-90,ry+ROW_H-18,r=4,fill=(*ca,200))
-        draw.text((MID-95,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(*ca,240),anchor="rm")
-        bb=int(BAR_MAX*abs(b)/vmx); cb=_RED_G if b>a else _TEAL
+        draw.text((MID-98,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(255,255,255,255),anchor="rm")
+        
+        bb=max(int(BAR_MAX*abs(b)/vmx), 8)
+        cb=_RED_G if b>a else _TEAL
         _rr2(draw,MID+90,ry+18,MID+90+bb,ry+ROW_H-18,r=4,fill=(*cb,200))
-        draw.text((MID+95,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(*cb,240),anchor="lm")
+        draw.text((MID+98,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(255,255,255,255),anchor="lm")
+        
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 
