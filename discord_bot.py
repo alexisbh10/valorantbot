@@ -957,23 +957,35 @@ def gen_pie_agentes(agent_rows, titulo="Agentes jugados"):
     draw.ellipse([CX-RI,CY-RI,CX+RI,CY+RI],fill=(*_PANEL,255))
     draw.text((CX,CY-12),str(total),font=_bc_eb(34),fill=(*_TEXT_G,240),anchor="mm")
     draw.text((CX,CY+18),"partidas",font=_bc_r(16),fill=(*_MUTED_G,200),anchor="mm")
-    LX=CX+RO+40
-    BAR_W = W-PAD-LX-28-52  
-    for i,(ag,cnt) in enumerate(zip(ags,cts)):
-        col=CHART_COLORS[i%len(CHART_COLORS)]; ly=90+i*46
-        if ly+36>H-PAD: break
-        _rr2(draw,LX,ly,LX+18,ly+18,r=4,fill=(*col,220))
-        draw.text((LX+28,ly+2),ag,font=_bc_b(18),fill=(*_TEXT_G,230),anchor="lm")
-        pct = cnt/total
-        bar_full_x = LX+28
-        bar_y = ly+24
-        draw.rounded_rectangle([bar_full_x, bar_y, bar_full_x+BAR_W, bar_y+7], radius=3, fill=(*col,40))
-        
-        # Evitar crash limitando el mínimo ancho al doble del radio (3*2 = 6)
-        w_bar = max(int(BAR_W*pct), 6)
-        draw.rounded_rectangle([bar_full_x, bar_y, bar_full_x+w_bar, bar_y+7], radius=3, fill=(*col,200))
-        draw.text((W-PAD, ly+9),f"{pct*100:.0f}%",font=_bc_r(17),fill=(*_MUTED_G,190),anchor="rm")
     
+    # Área de lista derecha alineada perfectamente
+    LX=CX+RO+40
+    BAR_W = 210 # Tamaño fijo y limpio para la barra horizontal
+    
+    for i,(ag,cnt) in enumerate(zip(ags,cts)):
+        col=CHART_COLORS[i%len(CHART_COLORS)]
+        ly=95+i*48 # Control del espaciado de filas
+        if ly+24>H-PAD: break
+        
+        # 1. Cuadrado de color del agente
+        _rr2(draw,LX,ly+2,LX+16,ly+18,r=4,fill=(*col,220))
+        
+        # 2. Nombre del agente (Alineado a la izquierda en el mismo eje horizontal)
+        draw.text((LX+24,ly+10),ag,font=_bc_b(18),fill=(*_TEXT_G,230),anchor="lm")
+        
+        # 3. Cálculo del porcentaje exacto y renderizado de la barra de progreso
+        pct = cnt/total
+        bar_start_x = LX + 130 # Eje X estático donde comienzan todas las barras
+        
+        # Fondo sutil de la barra (100%)
+        draw.rounded_rectangle([bar_start_x, ly+6, bar_start_x+BAR_W, ly+14], radius=4, fill=(*col,40))
+        # Relleno real acorde al porcentaje
+        w_bar = max(int(BAR_W*pct), 8)
+        draw.rounded_rectangle([bar_start_x, ly+6, bar_start_x+w_bar, ly+14], radius=4, fill=(*col,200))
+        
+        # 4. Texto de porcentaje (Alineado al extremo derecho de la tarjeta)
+        draw.text((W-PAD, ly+10),f"{pct*100:.0f}%",font=_bc_m(17),fill=(*_MUTED_G,200),anchor="rm")
+
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
 # ── GRÁFICA 4: Comparativa barras ────────────────────────────────────────────
@@ -987,31 +999,39 @@ def gen_barra_comparativa(stats_a, nombre_a, stats_b, nombre_b):
     vb=[float(stats_b.get("acs_medio") or 0),kda(stats_b),float(stats_b.get("adr_medio") or 0),
         float(stats_b.get("kast_medio") or 0),float(stats_b.get("dda_medio") or 0),
         float(stats_b.get("winrate") or 0),float(stats_b.get("hs_medio") or 0)]
-    n=len(mets); ROW_H=70; PAD=44; HEAD_H=80; W=1000; H=HEAD_H+n*ROW_H+PAD
+    
+    # Aumentamos HEAD_H a 125 para dar espacio vertical y evitar solapamientos
+    n=len(mets); ROW_H=70; PAD=44; HEAD_H=125; W=1000; H=HEAD_H+n*ROW_H+PAD
     img=_chart_base(W,H); draw=ImageDraw.Draw(img)
     _cheader(draw,W,PAD,f"{nombre_a}  vs  {nombre_b}","Comparativa de métricas competitivas")
-    MID=W//2; BAR_MAX=MID-PAD-120
-    _rr2(draw,MID-130,12,MID-10,36,r=4,fill=(*_TEAL,180))
-    draw.text((MID-70,24),nombre_a[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
-    _rr2(draw,MID+10,12,MID+130,36,r=4,fill=(*_RED_G,180))
-    draw.text((MID+70,24),nombre_b[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
+    
+    # Reducimos el espacio central muerto para que las barras sean más largas y legibles
+    MID=W//2; BAR_MAX=MID-PAD-65 
+    
+    # Movemos las leyendas hacia abajo (Y=82) para que nunca toquen el título principal
+    _rr2(draw,MID-140,82,MID-10,106,r=4,fill=(*_TEAL,180))
+    draw.text((MID-75,94),nombre_a[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
+    _rr2(draw,MID+10,82,MID+140,106,r=4,fill=(*_RED_G,180))
+    draw.text((MID+75,94),nombre_b[:16],font=_bc_m(16),fill=(*_TEXT_G,230),anchor="mm")
     
     for i,(met,a,b) in enumerate(zip(mets,va,vb)):
         ry=HEAD_H+i*ROW_H
         if i%2==0: _rr2(draw,PAD,ry+4,W-PAD,ry+ROW_H-4,r=6,fill=(*_PANEL,140))
         draw.text((MID,ry+ROW_H//2),met,font=_bc_eb(22),fill=(*_MUTED_G,200),anchor="mm")
+        
         vmx=max(abs(a),abs(b),0.01)
         
-        # Limitado a 8 para evitar crash por radio (r=4). Color blanco 255 y ancla cambiada para ir por dentro.
+        # Barra Jugador A (Teal / Izquierda)
         ba=max(int(BAR_MAX*abs(a)/vmx), 8) 
-        ca=_TEAL if a>=b else _RED_G
-        _rr2(draw,MID-90-ba,ry+18,MID-90,ry+ROW_H-18,r=4,fill=(*ca,200))
-        draw.text((MID-98,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(255,255,255,255),anchor="rm")
+        _rr2(draw,MID-65-ba,ry+18,MID-65,ry+ROW_H-18,r=4,fill=(*_TEAL,200))
+        # Número dentro de la barra (color blanco para contraste)
+        draw.text((MID-75,ry+ROW_H//2),fmt_num(a,1),font=_bc_b(20),fill=(255,255,255,255),anchor="rm")
         
+        # Barra Jugador B (Rojo / Derecha)
         bb=max(int(BAR_MAX*abs(b)/vmx), 8)
-        cb=_RED_G if b>a else _TEAL
-        _rr2(draw,MID+90,ry+18,MID+90+bb,ry+ROW_H-18,r=4,fill=(*cb,200))
-        draw.text((MID+98,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(255,255,255,255),anchor="lm")
+        _rr2(draw,MID+65,ry+18,MID+65+bb,ry+ROW_H-18,r=4,fill=(*_RED_G,200))
+        # Número dentro de la barra (color blanco para contraste)
+        draw.text((MID+75,ry+ROW_H//2),fmt_num(b,1),font=_bc_b(20),fill=(255,255,255,255),anchor="lm")
         
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
@@ -1325,12 +1345,6 @@ async def comparar(
 
     embed = discord.Embed(title=f"⚔️ {nombre1}#{tag1}  vs  {nombre2}#{tag2}", color=0x4fd1c5)
     embed.set_image(url="attachment://comparar.png")
-    embed.add_field(name=f"📊 {nombre1}#{tag1}",
-        value=f"ACS {fmt(s1['acs_medio'])} · KDA {kda1} · ADR {fmt(s1['adr_medio'])} · KAST {fmt(s1['kast_medio'],'%')} · DDA {fmt(s1['dda_medio'])} · WR {fmt(s1['winrate'],'%')} · HS {fmt(s1['hs_medio'],'%')} · {s1['total_matches']} partidas",
-        inline=False)
-    embed.add_field(name=f"📊 {nombre2}#{tag2}",
-        value=f"ACS {fmt(s2['acs_medio'])} · KDA {kda2} · ADR {fmt(s2['adr_medio'])} · KAST {fmt(s2['kast_medio'],'%')} · DDA {fmt(s2['dda_medio'])} · WR {fmt(s2['winrate'],'%')} · HS {fmt(s2['hs_medio'],'%')} · {s2['total_matches']} partidas",
-        inline=False)
     await interaction.followup.send(file=archivo, embed=embed)
 
 @bot.tree.command(name="lineups", description="Muestra lineups de un agente")
