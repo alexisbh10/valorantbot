@@ -40,18 +40,12 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 CANAL_ALERTAS_ID = 1496883989867139102
 
 
-def _load_fonts():
-    try:
-        return (
-            lambda s: ImageFont.truetype("assets/fonts/Inter-SemiBold.ttf", s),
-            lambda s: ImageFont.truetype("assets/fonts/Inter-Regular.ttf", s),
-            lambda s: ImageFont.truetype("assets/fonts/Inter-Medium.ttf", s),
-        )
-    except Exception:
-        f = ImageFont.load_default()
-        return lambda s: f, lambda s: f, lambda s: f
+FONTS_DIR = "/app/fonts"  # ruta en Railway
 
-_FB, _FR, _FM = _load_fonts()
+def _bc_eb(s): return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-ExtraBold.ttf", s)
+def _bc_b(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Bold.ttf", s)
+def _bc_m(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Medium.ttf", s)
+def _bc_r(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Regular.ttf", s)
 
 
 def _rank_palette(rank):
@@ -115,171 +109,174 @@ def _calc_tracker_metrics_from_stats(s):
 def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
     acc1, acc2 = _rank_palette(s.get("rank", ""))
     W, H = 1180, 680
-    PAD = 40
+    PAD = 44
 
-    TEXT = (244, 247, 252, 255)
-    MUTED = (170, 178, 194, 255)
-    FAINT = (255, 255, 255, 26)
-    POS = (92, 224, 152, 255)
-    NEG = (239, 106, 106, 255)
+    TEXT  = (244, 247, 252, 255)
+    MUTED = (160, 168, 185, 255)
+    FAINT = (255, 255, 255, 22)
+    POS   = (92,  224, 152, 255)
+    NEG   = (239, 106, 106, 255)
+    WARN  = (255, 185, 70,  255)
 
-    def mix(c1, c2, t):
-        return tuple(int(c1[i] * (1 - t) + c2[i] * t) for i in range(3))
-
-    def text(x, y, value, font, fill, anchor=None):
-        draw.text((x, y), str(value), font=font, fill=fill, anchor=anchor)
-
-    def fmt_num(v, digits=1, suffix=""):
-        if v is None:
-            return "—"
-        try:
-            return f"{round(float(v), digits)}{suffix}"
-        except Exception:
-            return f"{v}{suffix}"
+    def text(x, y, val, font, fill, anchor=None):
+        draw.text((x, y), str(val), font=font, fill=fill, anchor=anchor)
 
     def soft_badge(x1, y1, x2, y2, fill, outline=None):
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=18, fill=fill, outline=outline, width=1)
+        draw.rounded_rectangle([x1,y1,x2,y2], radius=16, fill=fill, outline=outline, width=1)
 
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    img = Image.new("RGBA", (W, H))
     draw = ImageDraw.Draw(img)
-
-    top_bg = mix(acc1, (10, 12, 18), 0.68)
-    bottom_bg = mix(acc2, (4, 6, 10), 0.84)
+    top_bg    = mix(acc1, (8, 10, 16), 0.72)
+    bottom_bg = mix(acc2, (3, 4, 8),  0.88)
     for y in range(H):
-        t = y / max(H - 1, 1)
+        t = y / max(H-1, 1)
         c = mix(top_bg, bottom_bg, t)
-        draw.line([(0, y), (W, y)], fill=(*c, 255), width=1)
+        draw.line([(0,y),(W,y)], fill=(*c,255), width=1)
 
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    glow = Image.new("RGBA", (W, H), (0,0,0,0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse((-220, -160, 340, 320), fill=(*acc1, 34))
-    gd.ellipse((W - 380, H - 320, W + 120, H + 120), fill=(*acc2, 28))
+    gd.ellipse((-200,-140,360,340), fill=(*acc1,30))
+    gd.ellipse((W-360,H-300,W+100,H+100), fill=(*acc2,24))
     img = Image.alpha_composite(img, glow)
     draw = ImageDraw.Draw(img)
 
-    draw.line((PAD, 126, W - PAD, 126), fill=(255, 255, 255, 34), width=1)
-    draw.line((PAD, 248, W - PAD, 248), fill=(255, 255, 255, 24), width=1)
-
+    # ── HEADER ──────────────────────────────────────────────────────────────
+    icon_x, icon_y, icon_size = PAD, 20, 90
     try:
-        icon_url = s.get("rank_icon") or s.get("rankIcon") or ""
+        icon_url = s.get("rank_icon") or ""
         if icon_url:
-            ri_data = requests.get(icon_url, timeout=6)
-            ri = Image.open(io.BytesIO(ri_data.content)).convert("RGBA").resize((86, 86))
-            img.paste(ri, (PAD, 24), ri)
-    except Exception:
-        pass
+            ri = Image.open(io.BytesIO(requests.get(icon_url,timeout=6).content)).convert("RGBA").resize((icon_size,icon_size))
+            img.paste(ri,(icon_x,icon_y),ri)
+            draw = ImageDraw.Draw(img)
+    except: pass
 
-    header_x = PAD + 104
-    text(header_x, 26, f"{s.get('nombre', '?')}#{s.get('tag', '?')}", _FB(38), TEXT)
-    text(header_x, 72, f"{s.get('rank', 'Unranked')} · {s.get('rr', 0)} RR · Nivel {s.get('nivel', '?')}", _FM(20), MUTED)
-    text(header_x, 102, modo_display, _FR(16), MUTED)
+    hx = icon_x + icon_size + 18
+    nombre = s.get('nombre','?')
+    tag    = s.get('tag','?')
+    draw.text((hx, 16), nombre, font=_bc_eb(54), fill=TEXT)
+    name_w = draw.textlength(nombre, font=_bc_eb(54))
+    draw.text((hx + name_w + 8, 28), f"#{tag}", font=_bc_m(34), fill=MUTED)
+    draw.text((hx, 80), f"{s.get('rank','Unranked')}  ·  {s.get('rr',0)} RR  ·  Nivel {s.get('nivel','?')}", font=_bc_m(22), fill=MUTED)
+    draw.text((hx, 106), modo_display, font=_bc_r(18), fill=(*acc1,210))
 
     try:
-        profile_url = (
-            s.get("profile_image")
-            or s.get("player_card")
-            or s.get("card")
-            or s.get("avatar")
-            or ""
-        )
+        profile_url = s.get("card") or s.get("player_card") or s.get("avatar") or ""
         if profile_url:
-            pf_data = requests.get(profile_url, timeout=6)
-            pf = Image.open(io.BytesIO(pf_data.content)).convert("RGBA")
+            pf = Image.open(io.BytesIO(requests.get(profile_url,timeout=6).content)).convert("RGBA")
+            sw,sh = 200,108
+            sc = min(sw/pf.width, sh/pf.height)
+            pf = pf.resize((int(pf.width*sc),int(pf.height*sc)),Image.Resampling.LANCZOS)
+            img.paste(pf,(W-PAD-sw+(sw-pf.width)//2, 11+(sh-pf.height)//2), pf)
+            draw = ImageDraw.Draw(img)
+    except: pass
 
-            slot_w = 210
-            slot_h = 96
-            slot_x = W - PAD - slot_w
-            slot_y = 18
+    DIV1 = 132
+    draw.line([(PAD,DIV1),(W-PAD,DIV1)], fill=(255,255,255,28), width=1)
 
-            scale = min(slot_w / pf.width, slot_h / pf.height)
-            new_w = int(pf.width * scale)
-            new_h = int(pf.height * scale)
-            pf = pf.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-            paste_x = slot_x + (slot_w - new_w) // 2
-            paste_y = slot_y + (slot_h - new_h) // 2
-
-            img.paste(pf, (paste_x, paste_y), pf)
-    except Exception:
-        pass
+    # ── METRICS BAR ─────────────────────────────────────────────────────────
+    wr_val = float(db_stats.get("winrate") or s.get("winrate") or 0)
+    wr_col = POS if wr_val >= 50 else WARN if wr_val >= 45 else NEG
 
     metrics = [
-        ("KDA", fmt_num(db_stats.get("kda") if tiene_datos_db else s.get("kda"), 2), None),
-        ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None),
-        ("HS", fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None),
-        ("WR", fmt_num(db_stats.get("winrate") if tiene_datos_db else s.get("winrate"), 1, "%"),
-         POS if float(db_stats.get("winrate") or s.get("winrate") or 0) >= 50 else NEG),
-        ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None),
+        ("KDA", fmt_num(db_stats.get("kda") if tiene_datos_db else s.get("kda"), 2),       None,   True),
+        ("ACS", fmt_num(db_stats.get("acs_medio") if tiene_datos_db else s.get("acs"), 1), None,   False),
+        ("HS",  fmt_num(db_stats.get("hs_medio") if tiene_datos_db else s.get("hs"), 1, "%"), None, False),
+        ("WR",  fmt_num(wr_val, 1, "%"),                                                    wr_col, False),
+        ("ADR", fmt_num(db_stats.get("adr_medio") if tiene_datos_db else s.get("adr"), 1), None,   False),
     ]
 
-    col_w = (W - PAD * 2) // 5
-    for i, (label, value, accent) in enumerate(metrics):
+    MY = DIV1 + 12
+    col_w = (W - PAD*2) // 5
+    for i, (label, value, accent, is_hero) in enumerate(metrics):
         x = PAD + i * col_w
-        text(x, 154, label, _FM(15), MUTED)
-        text(x, 188, value, _FB(30), accent or TEXT)
-        draw.line((x, 232, x + col_w - 20, 232), fill=(255, 255, 255, 26), width=1)
+        draw.text((x, MY+2),  label, font=_bc_m(14), fill=MUTED)
+        draw.text((x, MY+20), value, font=_bc_eb(38 if is_hero else 30), fill=accent or TEXT)
+        if i < len(metrics)-1:
+            draw.line([(x+col_w-2, MY+4),(x+col_w-2, MY+62)], fill=(255,255,255,16), width=1)
 
-    left_x = PAD
-    right_x = 610
-    base_y = 286
+    DIV2 = MY + 74
+    draw.line([(PAD,DIV2),(W-PAD,DIV2)], fill=(255,255,255,22), width=1)
 
-    text(left_x, base_y, "Resumen", _FB(26), TEXT)
-    played = db_stats.get("total_matches", 0) if tiene_datos_db else 0
-    text(left_x, base_y + 44, f"Partidas analizadas: {played}", _FR(17), MUTED)
+    # ── BODY ────────────────────────────────────────────────────────────────
+    BY = DIV2 + 20
+    MID = 548
+    RX  = MID + 38
 
-    pairs = [
-        ("KAST", fmt_num(db_stats.get("kast_medio"), 1, "%") if tiene_datos_db else "—"),
-        ("DDA", fmt_num(db_stats.get("dda_medio"), 1) if tiene_datos_db else "—"),
-        ("Main agent", (db_stats.get("main_agent") or s.get("agent") or "Desconocido") if isinstance(db_stats, dict) else (s.get("agent") or "Desconocido")),
-        ("Mapa", s.get("mapa", "Desconocido")),
+    # LEFT — Resumen
+    draw.text((PAD, BY), "Resumen", font=_bc_eb(28), fill=TEXT)
+    played = db_stats.get("total_matches",0) if tiene_datos_db else 0
+    draw.text((PAD, BY+34), f"{played} partidas analizadas", font=_bc_r(16), fill=MUTED)
+
+    dda_val = db_stats.get("dda_medio") if tiene_datos_db else None
+    try:
+        dda_col = POS if dda_val and float(dda_val) > 0 else NEG if dda_val and float(dda_val) < 0 else TEXT
+    except:
+        dda_col = TEXT
+
+    resumen = [
+        ("KAST",             fmt_num(db_stats.get("kast_medio"),1,"%") if tiene_datos_db else "—", TEXT),
+        ("DDA",              fmt_num(dda_val,1) if tiene_datos_db else "—",                        dda_col),
+        ("Agente principal", (db_stats.get("main_agent") or s.get("agent") or "?") if tiene_datos_db else "—", TEXT),
+        ("Mapa",             s.get("mapa","?"),                                                    TEXT),
     ]
+    row_h = 58
+    for idx, (lab, val, col) in enumerate(resumen):
+        ry = BY + 80 + idx * row_h
+        draw.text((PAD, ry),    lab, font=_bc_r(14), fill=MUTED)
+        draw.text((PAD, ry+18), val, font=_bc_b(22), fill=col)
+        if idx < len(resumen)-1:
+            draw.line([(PAD, ry+row_h-6),(MID-18, ry+row_h-6)], fill=FAINT, width=1)
 
-    y0 = base_y + 108
-    for idx, (lab, val) in enumerate(pairs):
-        y = y0 + idx * 60
-        text(left_x, y, lab, _FM(16), MUTED)
-        text(left_x + 190, y - 1, val, _FB(19), TEXT)
-        if idx < len(pairs) - 1:
-            draw.line((left_x, y + 34, 540, y + 34), fill=FAINT, width=1)
+    draw.line([(MID,BY),(MID,H-PAD)], fill=(255,255,255,18), width=1)
 
-    lm = s.get("last_match", {}) or {}
-    text(right_x, base_y, "Última partida", _FB(26), TEXT)
-    text(right_x, base_y + 46, f"{lm.get('kills', 0)}/{lm.get('deaths', 0)}/{lm.get('assists', 0)}", _FB(38), TEXT)
-    text(
-        right_x,
-        base_y + 94,
-        f"ACS {fmt_num(lm.get('acs'),1)} · HS {fmt_num(lm.get('hs'),1,'%')} · ADR {fmt_num(lm.get('adr'),1)}",
-        _FR(17),
-        MUTED
-    )
-    result_text = "Victoria" if lm.get("won") else "Derrota"
+    # RIGHT — Última partida
+    lm = s.get("last_match",{}) or {}
+    draw.text((RX, BY), "Última partida", font=_bc_eb(28), fill=TEXT)
     result_color = POS if lm.get("won") else NEG
-    text(W - PAD, base_y + 52, result_text, _FB(26), result_color, anchor="ra")
+    draw.text((W-PAD, BY+8), "Victoria" if lm.get("won") else "Derrota", font=_bc_eb(24), fill=result_color, anchor="ra")
 
-    draw.line((right_x, base_y + 140, W - PAD, base_y + 140), fill=FAINT, width=1)
+    kda_str = f"{lm.get('kills',0)}/{lm.get('deaths',0)}/{lm.get('assists',0)}"
+    draw.text((RX, BY+34), kda_str, font=_bc_eb(52), fill=TEXT)
 
-    text(right_x, base_y + 180, "Agentes más usados", _FB(26), TEXT)
+    ag_last = lm.get("agente","")
+    if ag_last:
+        aw = max(90, 24 + int(draw.textlength(ag_last, font=_bc_m(15))))
+        ax = RX + int(draw.textlength(kda_str, font=_bc_eb(52))) + 14
+        ay = BY + 48
+        soft_badge(ax, ay, ax+aw, ay+30, (*mix(acc1,(20,20,20),0.6),100), (*acc1,80))
+        draw.text((ax+aw//2, ay+5), ag_last, font=_bc_m(15), fill=TEXT, anchor="ma")
+
+    lm_y = BY + 102
+    lm_metrics = [
+        ("ACS",  fmt_num(lm.get("acs"),1)),
+        ("HS",   fmt_num(lm.get("hs"),1,"%")),
+        ("ADR",  fmt_num(lm.get("adr"),1)),
+        ("KAST", fmt_num(lm.get("kast"),1,"%")),
+        ("DDA",  fmt_num(lm.get("dda"),1)),
+    ]
+    lm_col_w = (W - PAD - RX) // len(lm_metrics)
+    for i,(lab,val) in enumerate(lm_metrics):
+        lx = RX + i * lm_col_w
+        draw.text((lx, lm_y),    lab, font=_bc_r(13), fill=MUTED)
+        draw.text((lx, lm_y+16), val, font=_bc_b(20), fill=TEXT)
+
+    draw.line([(RX, lm_y+44),(W-PAD, lm_y+44)], fill=FAINT, width=1)
+
+    asy = lm_y + 56
+    draw.text((RX, asy), "Agentes más usados", font=_bc_eb(22), fill=TEXT)
 
     agents = top_agents_db[:5] if top_agents_db else (s.get("top_agents") or [])[:5]
-    agents = [a for a in agents if a]
-    if not agents:
-        agents = [s.get("agent", "Desconocido")]
+    agents = [a for a in agents if a] or [s.get("agent","Desconocido")]
 
-    badge_x = right_x
-    badge_y = base_y + 228
-    row_limit = W - PAD - 20
-
+    bx, by_ = RX, asy + 32
     for ag in agents:
-        w = max(120, 30 + int(len(ag) * 11))
-        if badge_x + w > row_limit:
-            badge_x = right_x
-            badge_y += 52
-
-        fill_col = (*mix(acc1, (255, 255, 255), 0.28), 52)
-        soft_badge(badge_x, badge_y, badge_x + w, badge_y + 40, fill_col, outline=(255, 255, 255, 56))
-        text(badge_x + 14, badge_y + 9, ag, _FM(16), TEXT)
-        badge_x += w + 10
-
+        ag_font = _bc_m(15)
+        aw2 = max(90, 24 + int(draw.textlength(ag, font=ag_font)))
+        if bx + aw2 > W - PAD - 10:
+            bx = RX; by_ += 46
+        soft_badge(bx, by_, bx+aw2, by_+36, (*mix(acc1,(255,255,255),0.25),55), (*acc1,60))
+        draw.text((bx+aw2//2, by_+6), ag, font=ag_font, fill=TEXT, anchor="ma")
+        bx += aw2 + 8
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
