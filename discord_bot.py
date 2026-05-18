@@ -40,7 +40,7 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 CANAL_ALERTAS_ID = 1496883989867139102
 
 
-FONTS_DIR = "/app/fonts"  # ruta en Railway
+FONTS_DIR = "/assets"  # ruta en Railway
 
 def _bc_eb(s): return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-ExtraBold.ttf", s)
 def _bc_b(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Bold.ttf", s)
