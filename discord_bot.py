@@ -281,7 +281,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db):
         aw2 = max(90, 24 + int(draw.textlength(ag, font=ag_font)))
         if bx + aw2 > W - PAD - 10:
             bx = RX; by_ += 46
-        soft_badge(bx, by_, bx+aw2, by_+36, (*mix(acc1,(255,255,255),0.25),55), (*acc1,60))
+        soft_badge(bx, by_, bx+aw2, by_+36, (*mix(acc1,(20,20,20),0.6),100), (*acc1,60))
         draw.text((bx+aw2//2, by_+6), ag, font=ag_font, fill=TEXT, anchor="ma")
         bx += aw2 + 8
 
