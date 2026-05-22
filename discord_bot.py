@@ -26,10 +26,6 @@ TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Configurar la API de Gemini si existe la clave
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
