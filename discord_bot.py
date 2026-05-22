@@ -1422,12 +1422,11 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 
     # Método de acceso oficial con el SDK moderno 'google-genai'
     def ask_gemini_modern():
-        # Inicializamos el cliente pasándole tu API key limpia
         client = genai.Client(api_key=GEMINI_API_KEY.strip())
         
-        # Estructura v1 oficial para generación de contenido
+        # Cambiamos a gemini-2.5-flash (el modelo estándar actual de la API v1)
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=prompt
         )
         return response.text
