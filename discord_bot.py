@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from dotenv import load_dotenv
 
 # Importar la IA de Google Gemini
-import google.generativeai as genai
+from google import genai
 
 # ==============================================================================
 # CONFIGURACIÓN Y VARIABLES DE ENTORNO
@@ -1424,28 +1424,20 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "te carrileó la suerte"). Si jugó mal, húndelo (ej. "¿tenías el monitor apagado?").
     """
 
-    def ask_gemini_direct():
-        api_key = GEMINI_API_KEY.strip()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "safetySettings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ]
-        }
-        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
+    # Método de acceso oficial con el SDK moderno 'google-genai'
+    def ask_gemini_modern():
+        # Inicializamos el cliente pasándole tu API key limpia
+        client = genai.Client(api_key=GEMINI_API_KEY.strip())
         
-        if res.status_code != 200:
-            raise Exception(f"API HTTP {res.status_code}: {res.text}")
-            
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        # Estructura v1 oficial para generación de contenido
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
+        return response.text
 
     try:
-        respuesta_texto = await asyncio.to_thread(ask_gemini_direct)
+        respuesta_texto = await asyncio.to_thread(ask_gemini_modern)
         
         embed = discord.Embed(
             title=f"🤖 Análisis de IA para {nombre}",
@@ -1456,8 +1448,8 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
-        print(f"Error con Gemini HTTP: {e}")
-        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Detalle: `{str(e)[:100]}`")
+        print(f"Error con el nuevo SDK de Gemini: {e}")
+        await interaction.followup.send(f"❌ El coach de IA se ha liado con los cables. Detalle: `{str(e)[:100]}`")
 
 # ==============================================================================
 # MANEJADORES DE ERRORES GLOBALES
