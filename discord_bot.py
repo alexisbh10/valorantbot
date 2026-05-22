@@ -1375,13 +1375,12 @@ async def lineups(interaction: discord.Interaction, agente: str):
 # ==============================================================================
 # COMANDO IA: /COACH
 # ==============================================================================
-@bot.tree.command(name="coach", description="La IA analiza sarcásticamente la última partida")
+@bot.tree.command(name="coach", description="La IA de Gemini analiza sarcásticamente la última partida")
 async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     await interaction.response.defer()
     
-    hf_key = os.getenv("HF_API_KEY")
-    if not hf_key:
-        await interaction.followup.send("❌ La variable de entorno `HF_API_KEY` no está configurada.")
+    if not GEMINI_API_KEY:
+        await interaction.followup.send("❌ La API Key de Gemini no está configurada en las variables de entorno.")
         return
 
     server_id = str(interaction.guild_id)
@@ -1409,9 +1408,10 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     hs = float(ultima_partida["hs"] or 0)
     kda_ratio = round((k + a) / max(d, 1), 2)
 
-    prompt = f"""<s>[INST] Actúa como un entrenador de eSports de Valorant muy sarcástico, crítico y con humor negro. 
-    Analiza la última partida de este jugador llamado {nombre}. 
-    Tus comentarios deben ser muy breves (máximo 3 líneas), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, etc).
+    prompt = f"""
+    Actúa como un entrenador de eSports de Valorant muy sarcástico, crítico y con humor negro (pero sin insultos graves). 
+    Analiza la última partida de este jugador llamado {nombre}.
+    Tus comentarios deben ser breves (máximo 3-4 líneas), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, etc).
     
     Estadísticas:
     - Agente: {agente}
@@ -1421,55 +1421,43 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     - DDA: {dda}
     - HS: {hs}%
     
-    Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "seguro estabas jugando contra ciegos"). Si jugó mal, húndelo (ej. "¿seguro que tenías el monitor encendido?"). [/INST]"""
+    Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "te carrileó la suerte"). Si jugó mal, húndelo (ej. "¿tenías el monitor apagado?").
+    """
 
-    def ask_huggingface():
-        # Usamos el modelo oficial de Meta (Llama 3), que está alojado en los servidores más estables de HF
-        url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
-        headers = {
-            "Authorization": f"Bearer {hf_key.strip()}",
-            "Content-Type": "application/json"
-        }
+    def ask_gemini_direct():
+        api_key = GEMINI_API_KEY.strip()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
         payload = {
-            "inputs": prompt,
-            "parameters": {"max_new_tokens": 120, "temperature": 0.7}
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         }
-        
-        # Creamos una sesión con esteroides que reintenta la conexión si Railway parpadea
-        from requests.adapters import HTTPAdapter
-        from urllib3.util import Retry
-        
-        session = requests.Session()
-        retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
-        session.mount('https://', HTTPAdapter(max_retries=retries))
-        
-        # Forzamos a cerrar la conexión después de responder para no dejar puertos abiertos en Railway
-        res = session.post(url, json=payload, headers=headers, timeout=15)
+        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=15)
         
         if res.status_code != 200:
-            raise Exception(f"API HF {res.status_code}: {res.text}")
+            raise Exception(f"API HTTP {res.status_code}: {res.text}")
             
         data = res.json()
-        
-        # Limpiamos el formato de Llama 3
-        texto_completo = data[0]["generated_text"]
-        respuesta_ia = texto_completo.replace(prompt, "").strip()
-        return respuesta_ia
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     try:
-        respuesta_texto = await asyncio.to_thread(ask_huggingface)
+        respuesta_texto = await asyncio.to_thread(ask_gemini_direct)
         
         embed = discord.Embed(
             title=f"🤖 Análisis de IA para {nombre}",
-            description=f"*{respuesta_texto}*",
+            description=f"*{respuesta_texto.strip()}*",
             color=0x9b59b6
         )
         embed.set_footer(text=f"Última partida: {agente} | {k}/{d}/{a} | ACS: {acs}")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
-        print(f"Error con Hugging Face: {e}")
-        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Error: `{str(e)[:100]}`")
+        print(f"Error con Gemini HTTP: {e}")
+        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Detalle: `{str(e)[:100]}`")
 
 # ==============================================================================
 # MANEJADORES DE ERRORES GLOBALES
