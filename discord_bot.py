@@ -1426,7 +1426,12 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 
     # Hacemos la llamada HTTP directa a Google (Sin usar su librería bugeada)
     def ask_gemini():
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # .strip() elimina cualquier espacio o salto de línea fantasma de tu variable de entorno
+        api_key = GEMINI_API_KEY.strip()
+        
+        # Le añadimos -latest para forzar a que encuentre la versión activa
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+        
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "safetySettings": [
