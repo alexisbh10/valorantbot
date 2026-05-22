@@ -1424,21 +1424,34 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "seguro estabas jugando contra ciegos"). Si jugó mal, húndelo (ej. "¿seguro que tenías el monitor encendido?"). [/INST]"""
 
     def ask_huggingface():
-        # Usamos el modelo Mistral-7B por su excelente nivel de español y velocidad
-        url = "https://api-inference.huggingface.co/models/MistralAI/Mistral-7B-Instruct-v0.3"
-        headers = {"Authorization": f"Bearer {hf_key.strip()}"}
+        # Usamos el modelo oficial de Meta (Llama 3), que está alojado en los servidores más estables de HF
+        url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+        headers = {
+            "Authorization": f"Bearer {hf_key.strip()}",
+            "Content-Type": "application/json"
+        }
         payload = {
             "inputs": prompt,
-            "parameters": {"max_new_tokens": 150, "temperature": 0.7}
+            "parameters": {"max_new_tokens": 120, "temperature": 0.7}
         }
         
-        res = requests.post(url, json=payload, headers=headers)
+        # Creamos una sesión con esteroides que reintenta la conexión si Railway parpadea
+        from requests.adapters import HTTPAdapter
+        from urllib3.util import Retry
+        
+        session = requests.Session()
+        retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+        session.mount('https://', HTTPAdapter(max_retries=retries))
+        
+        # Forzamos a cerrar la conexión después de responder para no dejar puertos abiertos en Railway
+        res = session.post(url, json=payload, headers=headers, timeout=15)
+        
         if res.status_code != 200:
             raise Exception(f"API HF {res.status_code}: {res.text}")
             
         data = res.json()
         
-        # Hugging Face devuelve el prompt original + la respuesta. Limpiamos el texto:
+        # Limpiamos el formato de Llama 3
         texto_completo = data[0]["generated_text"]
         respuesta_ia = texto_completo.replace(prompt, "").strip()
         return respuesta_ia
