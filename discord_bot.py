@@ -1430,8 +1430,22 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     """
 
     try:
+        from google.generativeai.types import HarmCategory, HarmBlockThreshold
+        
+        # Le quitamos el bozal a la IA para que permita el sarcasmo y el roast
+        configuracion_seguridad = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
         modelo = genai.GenerativeModel('gemini-1.5-flash')
-        respuesta = await asyncio.to_thread(modelo.generate_content, prompt)
+        respuesta = await asyncio.to_thread(
+            modelo.generate_content, 
+            prompt,
+            safety_settings=configuracion_seguridad
+        )
         
         embed = discord.Embed(
             title=f"🤖 Análisis de IA para {nombre}",
@@ -1443,7 +1457,7 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        await interaction.followup.send("❌ El coach de IA está tomando un café y no ha podido responder.")
+        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Error técnico: `{str(e)[:100]}`")
 
 
 # ==============================================================================
