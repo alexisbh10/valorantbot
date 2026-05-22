@@ -1457,7 +1457,7 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Error técnico: `{str(e)[:100]}`")
+        await interaction.followup.send(f"❌ Error v2: `{str(e)[:100]}`")
 
 
 # ==============================================================================
