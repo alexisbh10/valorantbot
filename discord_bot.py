@@ -1440,7 +1440,7 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
 
-        modelo = genai.GenerativeModel('gemini-pro')        
+        modelo = genai.GenerativeModel('gemini-1.5-flash')        
         respuesta = await asyncio.to_thread(
             modelo.generate_content, 
             prompt,
