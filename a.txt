@@ -1,0 +1,12 @@
+postgresql://neondb_owner:npg_8MFOgvI5DGxQ@ep-blue-dawn-abq2k5en.eu-west-2.aws.neon.tech/neondb?sslmode=require
+
+Host
+ep-blue-dawn-abq2k5en.eu-west-2.aws.neon.tech
+Database
+neondb
+Role
+neondb_owner
+Password
+************
+Pooler host
+ep-blue-dawn-abq2k5en-pooler.eu-west-2.aws.neon.tech
