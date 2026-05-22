@@ -1375,12 +1375,12 @@ async def lineups(interaction: discord.Interaction, agente: str):
 # ==============================================================================
 # COMANDO IA: /COACH
 # ==============================================================================
-@bot.tree.command(name="coach", description="La IA de Gemini analiza sarcásticamente la última partida de un jugador")
+@bot.tree.command(name="coach", description="La IA de Gemini analiza sarcásticamente la última partida")
 async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     await interaction.response.defer()
     
     if not GEMINI_API_KEY:
-        await interaction.followup.send("❌ La API Key de Gemini no está configurada. (Revisa tus variables de entorno).")
+        await interaction.followup.send("❌ La API Key de Gemini no está configurada.")
         return
 
     server_id = str(interaction.guild_id)
@@ -1400,7 +1400,6 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
         await interaction.followup.send(f"❌ No tengo partidas registradas de **{nombre}#{tag}** para analizar.")
         return
 
-    # Preparamos los datos
     k, d, a = ultima_partida["kills"], ultima_partida["deaths"], ultima_partida["assists"]
     acs = ultima_partida["acs"]
     agente = ultima_partida["agente"]
@@ -1409,55 +1408,57 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     hs = float(ultima_partida["hs"] or 0)
     kda_ratio = round((k + a) / max(d, 1), 2)
 
-    # Prompt para la IA
     prompt = f"""
-    Actúa como un entrenador de eSports de Valorant muy sarcástico, crítico y con humor negro (pero sin insultos graves ni ofender la moral). 
+    Actúa como un entrenador de eSports de Valorant muy sarcástico, crítico y con humor negro (pero sin insultos graves). 
     Analiza la última partida de este jugador llamado {nombre}.
+    Tus comentarios deben ser breves (máximo 3-4 líneas), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, etc).
     
-    Tus comentarios deben ser breves (máximo 3-4 líneas), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, smurf, etc).
-    
-    Aquí tienes sus estadísticas:
-    - Agente jugado: {agente}
-    - Resultado del equipo: {resultado}
+    Estadísticas:
+    - Agente: {agente}
+    - Resultado: {resultado}
     - K/D/A: {k}/{d}/{a} (Ratio KDA: {kda_ratio})
-    - ACS (Puntuación de combate): {acs}
-    - DDA (Daño delta, si es negativo es que recibió más daño del que hizo al rival): {dda}
-    - Porcentaje de tiros a la cabeza: {hs}%
+    - ACS: {acs}
+    - DDA: {dda}
+    - HS: {hs}%
     
-    Haz un comentario lapidario sobre su rendimiento basándote en estos números. 
-    Si jugó increíble (ej. KDA > 2, ACS > 300), felicítalo pero con ironía (ej. "seguro estabas jugando contra ciegos" o "te carrileó la suerte"). 
-    Si jugó fatal, húndelo en la miseria (ej. "¿Seguro que tenías el monitor encendido?" o "Tu ratón está desconectado").
+    Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "te carrileó la suerte"). Si jugó mal, húndelo (ej. "¿tenías el monitor apagado?").
     """
 
-    try:
-        from google.generativeai.types import HarmCategory, HarmBlockThreshold
-        
-        # Le quitamos el bozal a la IA para que permita el sarcasmo y el roast
-        configuracion_seguridad = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    # Hacemos la llamada HTTP directa a Google (Sin usar su librería bugeada)
+    def ask_gemini():
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         }
+        res = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        # Si Google da un error, lo cazamos
+        if res.status_code != 200:
+            raise Exception(f"API HTTP {res.status_code}: {res.text}")
+            
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
-        modelo = genai.GenerativeModel('gemini-1.5-flash')        
-        respuesta = await asyncio.to_thread(
-            modelo.generate_content, 
-            prompt,
-            safety_settings=configuracion_seguridad
-        )
+    try:
+        respuesta_texto = await asyncio.to_thread(ask_gemini)
         
         embed = discord.Embed(
             title=f"🤖 Análisis de IA para {nombre}",
-            description=f"*{respuesta.text.strip()}*",
+            description=f"*{respuesta_texto.strip()}*",
             color=0x9b59b6
         )
         embed.set_footer(text=f"Última partida: {agente} | {k}/{d}/{a} | ACS: {acs}")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
-        print(f"Error con Gemini: {e}")
-        await interaction.followup.send(f"❌ Error v2: `{str(e)[:100]}`")
+        print(f"Error con Gemini HTTP: {e}")
+        await interaction.followup.send(f"❌ El coach de IA está tomando un café. Error HTTP: `{str(e)[:100]}`")
 
 
 # ==============================================================================
