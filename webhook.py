@@ -8,33 +8,8 @@ from collections import Counter
 import datetime
 import asyncpg
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
-# ==============================================================================
-# POOL DE BASE DE DATOS Y CICLO DE VIDA (LIFESPAN)
-# ==============================================================================
-DB_POOL = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global DB_POOL
-    # Inicializar el pool al arrancar el servidor
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        DB_POOL = await asyncpg.create_pool(database_url)
-        print("✅ Webhook conectado exitosamente a PostgreSQL (Neon.tech)")
-    else:
-        print("⚠️ ALERTA: No se detectó la variable DATABASE_URL")
-    
-    yield
-    
-    # Cerrar el pool al apagar el servidor
-    if DB_POOL:
-        await DB_POOL.close()
-        print("🛑 Pool de base de datos cerrado.")
-
-# Instanciar FastAPI con el manejador de ciclo de vida
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,15 +21,14 @@ app.add_middleware(
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
 cache = {}
 
+DB_POOL = None
+
 async def get_db():
     global DB_POOL
     if DB_POOL is None:
         DB_POOL = await asyncpg.create_pool(os.getenv("DATABASE_URL"))
     return DB_POOL
 
-# ==============================================================================
-# CACHÉ Y HELPERS HTTP
-# ==============================================================================
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
@@ -95,9 +69,6 @@ def get_team_win(match, player):
         return teams.get(team, {}).get("has_won", False)
     return False
 
-# ==============================================================================
-# PROCESAMIENTO DE ESTADÍSTICAS DE VALORANT
-# ==============================================================================
 def extract_tracker_like_match_metrics(match, player):
     try:
         stats         = player.get("stats", {}) or {}
@@ -222,6 +193,7 @@ def analyze_matches(matches, puuid, username, tag):
     kdas_history  = []
     agents_played = []
     total_matches = 0
+    total_matches = 0
     total_kast_rounds = 0
     has_kast_data = False
 
@@ -244,6 +216,7 @@ def analyze_matches(matches, puuid, username, tag):
             bs = stats.get("bodyshots", 0) or 0
             ls = stats.get("legshots", 0)  or 0
 
+            # ¡ESTA ES LA LÍNEA QUE SE HABÍA BORRADO!
             match_metrics = extract_tracker_like_match_metrics(m, player)
             r = match_metrics["rounds_played"] or 0
 
@@ -254,6 +227,7 @@ def analyze_matches(matches, puuid, username, tag):
             bodyshots += bs
             legshots  += ls
             
+            # Sumamos el daño de forma segura
             if match_metrics["damage_dealt_total"] is not None:
                 damage += match_metrics["damage_dealt_total"]
             if match_metrics["damage_received_total"] is not None:
@@ -450,9 +424,6 @@ def obtener_stats(username, tag, region="eu"):
     set_cache(key, stats)
     return stats, None
 
-# ==============================================================================
-# ENDPOINTS PÚBLICOS
-# ==============================================================================
 @app.post("/tracker")
 async def tracker(request: Request):
     try:
@@ -475,10 +446,9 @@ async def tracker(request: Request):
         tb = traceback.format_exc()
         print(f"[/tracker ERROR] {e}\n{tb}")
         return {"success": False, "error": f"Error interno del webhook: {e}"}
+    
 
-# ==============================================================================
-# RUTAS DE ADMINISTRACIÓN
-# ==============================================================================
+# ─── ADMIN ROUTES ───────────────────────────────────────────
 @app.get("/admin/jugadores")
 async def admin_get_jugadores(secret: str = ""):
     if secret != os.getenv("ADMIN_SECRET", ""):
@@ -497,6 +467,7 @@ async def admin_update_jugador(jugador_id: int, req: Request, secret: str = ""):
         "UPDATE jugadores SET nombre=$1, tag=$2, ultimo_rango=$3 WHERE id=$4",
         b["nombre"], b["tag"], b.get("ultimo_rango"), jugador_id
     )
+
     return {"ok": True}
 
 @app.get("/admin/partidas")
@@ -551,11 +522,10 @@ async def admin_delete_partida(match_id: str, nombre: str, tag: str, secret: str
         match_id, nombre, tag)
     return {"ok": True}
 
-# ==============================================================================
-# INICIO DE UVICORN (EXTRACCIÓN DINÁMICA DEL PUERTO PARA RENDER)
-# ==============================================================================
+
+# === AJUSTE DE PUERTO EXCLUSIVO PARA RENDER ===
 if __name__ == "__main__":
     import uvicorn
-    # Render asigna el puerto en la variable 'PORT'. Si no existe, usa 10000 por defecto.
+    # Render inyecta el puerto dinámico en la variable PORT. Si no existe, usa 10000.
     puerto = int(os.getenv("PORT", 10000))
-    uvicorn.run("webhook:app", host="0.0.0.0", port=puerto)
+    uvicorn.run(app, host="0.0.0.0", port=puerto)
