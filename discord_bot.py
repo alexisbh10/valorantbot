@@ -84,7 +84,7 @@ CHART_COLORS = [_TEAL, _RED_G, _GOLD, _GREEN_G, _PURPLE, _BLUE_G, (251,211,141),
 # ==============================================================================
 # FUNCIONES AUXILIARES (HELPERS)
 # ==============================================================================
-FONTS_DIR = "/assets/fonts"
+FONTS_DIR = "assets/fonts"
 def _bc_eb(s): return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-ExtraBold.ttf", s)
 def _bc_b(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Bold.ttf", s)
 def _bc_m(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Medium.ttf", s)
