@@ -12,29 +12,20 @@ import math as _math
 from collections import Counter
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from dotenv import load_dotenv
-
-# Importar la IA de Google Gemini
 from google import genai
 
-# ==============================================================================
-# CONFIGURACIÓN Y VARIABLES DE ENTORNO
-# ==============================================================================
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:8000")
+TRACKER_URL = os.getenv("TRACKER_URL", "http://localhost:10000")
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 logging.basicConfig(level=logging.INFO)
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
-# PON AQUÍ EL ID DE TU CANAL REAL
 CANAL_ALERTAS_ID = 1496883989867139102
 
-# ==============================================================================
-# CONSTANTES
-# ==============================================================================
 MODOS_DISCORD = [
     app_commands.Choice(name="Competitivo (Ranked 5v5)", value="Competitive"),
     app_commands.Choice(name="Skirmish (1v1)", value="Skirmish 1v1"),
@@ -67,7 +58,6 @@ MAP_SPLASHES = {
     "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
 }
 
-# Colores gráficos compartidos
 _BG      = (10,  11, 17)
 _PANEL   = (15,  17, 25)
 _BORDER  = (42,  48, 67)
@@ -81,14 +71,19 @@ _PURPLE  = (167, 139, 250)
 _BLUE_G  = (118, 228, 247)
 CHART_COLORS = [_TEAL, _RED_G, _GOLD, _GREEN_G, _PURPLE, _BLUE_G, (251,211,141), (246,135,179), (154,230,180)]
 
-# ==============================================================================
-# FUNCIONES AUXILIARES (HELPERS)
-# ==============================================================================
 FONTS_DIR = "assets/fonts"
-def _bc_eb(s): return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-ExtraBold.ttf", s)
-def _bc_b(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Bold.ttf", s)
-def _bc_m(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Medium.ttf", s)
-def _bc_r(s):  return ImageFont.truetype(f"{FONTS_DIR}/BarlowCondensed-Regular.ttf", s)
+
+def _cargar_fuente_proyecto(nombre_fuente, tamano):
+    ruta_completa = f"{FONTS_DIR}/{nombre_fuente}"
+    try:
+        return ImageFont.truetype(ruta_completa, tamano)
+    except OSError:
+        return ImageFont.load_default()
+
+def _bc_eb(s): return _cargar_fuente_proyecto("BarlowCondensed-ExtraBold.ttf", s)
+def _bc_b(s):  return _cargar_fuente_proyecto("BarlowCondensed-Bold.ttf", s)
+def _bc_m(s):  return _cargar_fuente_proyecto("BarlowCondensed-Medium.ttf", s)
+def _bc_r(s):  return _cargar_fuente_proyecto("BarlowCondensed-Regular.ttf", s)
 
 def mix(c1, c2, t): return tuple(int(c1[i]*(1-t) + c2[i]*t) for i in range(3))
 def _gl(a, b, t): return tuple(int(a[i]*(1-t)+b[i]*t) for i in range(3))
@@ -124,6 +119,49 @@ def _rank_palette(rank):
     for key, pal in palettes.items():
         if key in r: return pal
     return ((255, 70, 85), (200, 20, 40))
+
+# ==============================================================================
+# NUEVO MOTOR GRÁFICO: GENERADOR DE BANNERS PARA REEMPLAZAR TEXTO POR IMÁGENES
+# ==============================================================================
+def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
+    W, H = 750, 160
+    img = Image.new("RGBA", (W, H))
+    draw = ImageDraw.Draw(img)
+    
+    # Fondo con degradado sutil competitivo
+    for y in range(H):
+        t = y / (H - 1)
+        c = _gl(_BG, (18, 22, 32), t)
+        draw.line([(0, y), (W, y)], fill=(*c, 255))
+        
+    # Rectángulo contenedor interno estilizado
+    _rr2(draw, 14, 14, W - 14, H - 14, r=10, fill=(15, 18, 26, 200), outline=_BORDER, w=1)
+    
+    # Barra lateral de estado de neón luminoso
+    _rr2(draw, 22, 24, 28, H - 24, r=3, fill=color_neon)
+    
+    # Dibujado de textos limpios
+    draw.text((44, 28), titulo, font=_bc_eb(26), fill=_TEXT_G)
+    
+    # Ajuste automático por si el mensaje es largo
+    if draw.textlength(mensaje, font=_bc_r(18)) > (W - 80):
+        palabras = mensaje.split(" ")
+        linea1, linea2 = "", ""
+        for p in palabras:
+            if draw.textlength(linea1 + " " + p, font=_bc_r(18)) < (W - 90):
+                linea1 += " " + p
+            else:
+                linea2 += " " + p
+        draw.text((44, 68), linea1.strip(), font=_bc_r(18), fill=_MUTED_G)
+        if linea2:
+            draw.text((44, 94), linea2.strip(), font=_bc_r(18), fill=_MUTED_G)
+    else:
+        draw.text((44, 72), mensaje, font=_bc_r(19), fill=_MUTED_G)
+        
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
 
 def _calc_tracker_metrics_from_stats(s):
     lm = s.get("last_match", {}) or {}
@@ -195,9 +233,11 @@ async def _check_racha(nombre, tag, canal):
     if len(ultimas) < 3: return
     resultados = [r["won"] for r in ultimas]
     if all(resultados[:3]):
-        await canal.send(f"🔥 **¡{nombre}#{tag} está en racha!** 3 victorias seguidas. Que no se le suba a la cabeza. 🏆")
+        buf = gen_banner_notificacion("🔥 JUGADOR EN RACHA", f"¡{nombre}#{tag} lleva 3 victorias seguidas! Tiembla VCT.", _GREEN_G)
+        await canal.send(file=discord.File(fp=buf, filename="racha.png"))
     elif not any(resultados[:3]):
-        await canal.send(f"💀 **{nombre}#{tag} lleva 3 derrotas seguidas.** Alguien que le diga que respire. 🫂")
+        buf = gen_banner_notificacion("💀 RACHA DE DERROTAS", f"{nombre}#{tag} lleva 3 derrotas seguidas. Alguien que le esconda el ratón.", _RED_G)
+        await canal.send(file=discord.File(fp=buf, filename="derrotas.png"))
 
 async def _check_rango(nombre, tag, nuevo_rango, canal):
     row = await bot.db.fetchrow(
@@ -218,16 +258,18 @@ async def _check_rango(nombre, tag, nuevo_rango, canal):
         ni = ranks_order.index(nuevo_rango) if nuevo_rango in ranks_order else -1
         if vi >= 0 and ni >= 0:
             if ni > vi:
-                await canal.send(f"📈 **¡{nombre}#{tag} ha subido de rango!** {viejo} → **{nuevo_rango}** 🎉")
+                buf = gen_banner_notificacion("📈 ¡UPGRADE DE RANGO!", f"{nombre}#{tag} ha ascendido: {viejo} ➔ {nuevo_rango} 🎉", _GREEN_G)
+                await canal.send(file=discord.File(fp=buf, filename="rank_up.png"))
             else:
-                await canal.send(f"📉 **{nombre}#{tag} ha bajado de rango.** {viejo} → **{nuevo_rango}** 😬")
+                buf = gen_banner_notificacion("📉 ¡DOWNGRADE DE RANGO!", f"{nombre}#{tag} ha caido de rango: {viejo} ➔ {nuevo_rango} 😬", _RED_G)
+                await canal.send(file=discord.File(fp=buf, filename="rank_down.png"))
     await bot.db.execute(
         "UPDATE jugadores SET ultimo_rango = $1 WHERE nombre ILIKE $2 AND tag ILIKE $3",
         nuevo_rango, nombre, tag,
     )
 
 # ==============================================================================
-# GENERADORES DE GRÁFICAS (PIL)
+# GENERADORES DE GRÁFICAS DE ALTO RENDIMIENTO (PIL)
 # ==============================================================================
 def _chart_base(W, H):
     img = Image.new("RGBA",(W,H))
@@ -696,7 +738,6 @@ def gen_precision(rows, nombre_jugador):
     draw.text((lx+36,ly+38),"Media móvil",font=_bc_m(16),fill=(*_TEXT_G,220))
     buf=io.BytesIO(); img.convert("RGB").save(buf,format="PNG",optimize=True); buf.seek(0); return buf
 
-
 # ==============================================================================
 # EVENTOS DEL BOT
 # ==============================================================================
@@ -753,11 +794,7 @@ async def on_ready():
         guild_id = os.getenv("DISCORD_GUILD_ID")
         if guild_id:
             guild_obj = discord.Object(id=int(guild_id))
-            
-            # --- LINHA NOVA ADICIONADA AQUI ---
             bot.tree.copy_global_to(guild=guild_obj)
-            # ----------------------------------
-            
             synced = await bot.tree.sync(guild=guild_obj)
             print(f"✅ Slash commands sincronizados en guild {guild_id}: {len(synced)}")
         else:
@@ -851,32 +888,18 @@ async def vigilante_partidas():
                 nuevo_rango = s.get("rank")
                 await _check_rango(nombre, tag, nuevo_rango, canal)
 
+                # TRANSFORMACIÓN: LA ALERTA AUTOMÁTICA DE PARTIDAS AHORA ES UNA IMAGEN PIL
                 resultado = "VICTORIA" if won else "DERROTA"
-                color_borde = 0x00FF00 if won else 0xFF0000
-                nombre_real = s.get("nombre") or nombre
-                tag_real = s.get("tag") or tag
-                title = f"🎮 Nueva partida de {nombre_real}#{tag_real}"
-                desc = f"Acaba de jugar **{modo_formateado}** en **{mapa}** con **{agente}**."
-
-                embed = discord.Embed(title=title, description=desc, color=color_borde)
-                embed.add_field(name="Resultado", value=f"**{resultado}**", inline=True)
-                embed.add_field(name="K/D/A", value=f"{k}/{d}/{a}", inline=True)
-                embed.add_field(name="ACS", value=str(acs), inline=True)
-                if tracker_metrics["adr"] is not None:
-                    embed.add_field(name="ADR", value=str(round(tracker_metrics["adr"], 1)), inline=True)
-                if tracker_metrics["kast"] is not None:
-                    embed.add_field(name="KAST", value=f"{round(tracker_metrics['kast'], 1)}%", inline=True)
-                if tracker_metrics["dda"] is not None:
-                    embed.add_field(name="DDA", value=str(round(tracker_metrics["dda"], 1)), inline=True)
-                if s.get("card"):
-                    embed.set_thumbnail(url=s.get("card"))
+                color_neon = _GREEN_G if won else _RED_G
+                tit = f"🎮 NUEVA PARTIDA DE {nombre.upper()}#{tag.upper()}"
+                msg_body = f"{resultado} en {mapa} ({modo_formateado}) con {agente}. KDA: {k}/{d}/{a} | ACS: {acs}"
                 
-                await canal.send(embed=embed)
-                print(f"✅ Alerta de {nombre}#{tag} enviada correctamente a Discord.")
+                buf_alert = gen_banner_notificacion(tit, msg_body, color_neon)
+                await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.png"))
+                print(f"✅ Alerta visual de {nombre}#{tag} enviada correctamente a Discord.")
                 
         except Exception as e:
             print(f"❌ Error procesando a {j['nombre']}#{j['tag']}: {e}")
-
 
 @tasks.loop(hours=1)
 async def resumen_semanal():
@@ -934,39 +957,44 @@ async def resumen_semanal():
         await canal.send(embed=embed)
 
 # ==============================================================================
-# COMANDOS (SLASH COMMANDS)
+# COMANDOS (SLASH COMMANDS REFACTORIZADOS CON IMÁGENES NATIVAS)
 # ==============================================================================
 @bot.tree.command(name="add", description="Guarda a un colega en la base de datos del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
+    await interaction.response.defer()
     server_id = str(interaction.guild_id)
     try:
         await bot.db.execute(
             "INSERT INTO jugadores (server_id, nombre, tag) VALUES ($1, $2, $3)",
             server_id, nombre, tag,
         )
-        await interaction.response.send_message(f"✅ Añadido a la lista de la temporada: **{nombre}#{tag}**")
+        buf = gen_banner_notificacion("✅ JUGADOR REGISTRADO", f"Añadido correctamente al radar de alertas: {nombre}#{tag}", _GREEN_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="add_ok.png"))
     except asyncpg.exceptions.UniqueViolationError:
-        await interaction.response.send_message(f"⚠️ {nombre}#{tag} ya está en la lista.")
-
+        buf = gen_banner_notificacion("⚠️ JUGADOR EXISTENTE", f"El agente {nombre}#{tag} ya está en la lista de seguimiento.", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="add_warn.png"))
 
 @bot.tree.command(name="remove", description="Deja de vigilar a un jugador del servidor")
 async def remove(interaction: discord.Interaction, nombre: str, tag: str):
+    await interaction.response.defer()
     server_id = str(interaction.guild_id)
     deleted = await bot.db.execute(
         "DELETE FROM jugadores WHERE server_id = $1 AND nombre ILIKE $2 AND tag ILIKE $3",
         server_id, nombre, tag,
     )
     if deleted == "DELETE 1":
-        await interaction.response.send_message(f"🗑️ **{nombre}#{tag}** eliminado de la vigilancia de este servidor.")
+        buf = gen_banner_notificacion("🗑️ AGENTE ELIMINADO", f"Se han desactivado las alertas de tracking para: {nombre}#{tag}", _RED_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="remove_ok.png"))
     else:
-        await interaction.response.send_message(f"⚠️ No encontré a **{nombre}#{tag}** en la lista de este servidor.")
-
+        buf = gen_banner_notificacion("⚠️ ERROR DE EXTRACTOR", f"No se encontró ninguna cuenta registrada bajo {nombre}#{tag}", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="remove_fail.png"))
 
 @bot.tree.command(name="sync", description="Sincroniza los slash commands en este servidor")
 async def sync_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     synced = await bot.tree.sync(guild=discord.Object(id=interaction.guild_id))
-    await interaction.response.send_message(f"✅ {len(synced)} comandos sincronizados en este servidor.", ephemeral=True)
-
+    buf = gen_banner_notificacion("⚙️ ÁRBOL SINCRONIZADO", f"Sincronizados con éxito {len(synced)} comandos de barra localmente.", _BLUE_G)
+    await interaction.followup.send(file=discord.File(fp=buf, filename="sync.png"), ephemeral=True)
 
 @bot.tree.command(name="stats", description="Muestra las estadísticas de un jugador de Valorant")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -979,7 +1007,8 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     s, err = await fetch_stats(nombre, tag, region)
     if err or not s:
-        await interaction.followup.send(f"❌ Fallo al buscar a {nombre}#{tag}: {err}")
+        buf = gen_banner_notificacion("❌ ERROR DE COMBATE", f"Fallo al buscar a {nombre}#{tag}: {err}", _RED_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="error_search.png"))
         return
 
     rows = await bot.db.fetch(
@@ -1002,7 +1031,8 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
 
     filtered_rows = rows
     if not filtered_rows:
-        await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en **{modo_display}**.")
+        buf = gen_banner_notificacion("❌ HISTORIAL SIN REGISTROS", f"No hay partidas guardadas para {nombre}#{tag} en {modo_display}", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="error_empty.png"))
         return
 
     tk = sum((r["kills"] or 0) for r in filtered_rows)
@@ -1077,13 +1107,13 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
         archivo = discord.File(fp=buf, filename="stats.png")
     except Exception as e:
         logging.exception("Error generando tarjeta /stats")
-        await interaction.followup.send(f"❌ Error generando la tarjeta de stats: {e}")
+        buf = gen_banner_notificacion("❌ CRASH INTERNO", f"Error pintando tarjeta de stats: {e}", _RED_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_canvas.png"))
         return
 
     embed = discord.Embed(color=0xFF4655)
     embed.set_image(url="attachment://stats.png")
     await interaction.followup.send(file=archivo, embed=embed)
-
 
 @bot.tree.command(name="graficas", description="Muestra gráficas de evolución, precisión y mapas de un jugador")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -1106,7 +1136,8 @@ async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo
     )
 
     if not rows:
-        await interaction.followup.send(f"❌ No hay partidas guardadas para **{nombre}#{tag}** en ese modo.")
+        buf = gen_banner_notificacion("❌ SIN REGISTROS", f"No hay partidas guardadas para {nombre}#{tag} en ese modo.", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_graficas.png"))
         return
 
     archivos = []
@@ -1144,7 +1175,6 @@ async def graficas(interaction: discord.Interaction, nombre: str, tag: str, modo
     )
     await interaction.followup.send(embed=embed, files=archivos)
 
-
 @bot.tree.command(name="comparar", description="Compara las stats competitivas de dos jugadores del servidor")
 async def comparar(
     interaction: discord.Interaction,
@@ -1180,10 +1210,12 @@ async def comparar(
     s1, s2 = await asyncio.gather(_get_stats(nombre1, tag1), _get_stats(nombre2, tag2))
 
     if not s1 or not s1["total_matches"]:
-        await interaction.followup.send(f"❌ No hay datos para **{nombre1}#{tag1}**.")
+        buf = gen_banner_notificacion("❌ REGISTROS INSUFICIENTES", f"No hay datos guardados para {nombre1}#{tag1}", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_comp1.png"))
         return
     if not s2 or not s2["total_matches"]:
-        await interaction.followup.send(f"❌ No hay datos para **{nombre2}#{tag2}**.")
+        buf = gen_banner_notificacion("❌ REGISTROS INSUFICIENTES", f"No hay datos guardados para {nombre2}#{tag2}", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_comp2.png"))
         return
 
     buf = await asyncio.to_thread(gen_barra_comparativa, dict(s1), f"{nombre1}#{tag1}", dict(s2), f"{nombre2}#{tag2}")
@@ -1192,7 +1224,6 @@ async def comparar(
     embed = discord.Embed(title=f"⚔️ {nombre1}#{tag1}  vs  {nombre2}#{tag2}", color=0x4fd1c5)
     embed.set_image(url="attachment://comparar.png")
     await interaction.followup.send(file=archivo, embed=embed)
-
 
 @bot.tree.command(name="leaderboard", description="Ranking de los colegas del servidor")
 @app_commands.choices(modo=MODOS_DISCORD)
@@ -1241,7 +1272,8 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
     )
 
     if not scores:
-        await interaction.followup.send(f"❌ Todavía no hay partidas de **{modo_display}** en este servidor.")
+        buf = gen_banner_notificacion("❌ SIN COMBATES REGISTRADOS", f"Todavía no hay partidas de {modo_display} en este servidor.", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_leader.png"))
         return
 
     embed = discord.Embed(title=f"🏆 Leaderboard ({modo_display})", color=0xFFD700)
@@ -1267,7 +1299,6 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
         embed.add_field(name=f"{medalla} {p['nombre']}#{p['tag']} ({main_agent})", value=stats_txt, inline=False)
 
     await interaction.followup.send(embed=embed)
-
 
 @bot.tree.command(name="temporada", description="Resumen competitivo de la temporada del servidor")
 async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[str] = None):
@@ -1295,7 +1326,8 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
     )
 
     if not rows:
-        await interaction.followup.send(f"❌ Todavía no hay datos de **{modo_display}** en este servidor.")
+        buf = gen_banner_notificacion("❌ COLA VACÍA", f"Todavía no hay datos de {modo_display} en este servidor.", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_temp.png"))
         return
 
     agent_rows_all = await bot.db.fetch(
@@ -1346,7 +1378,6 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
 
     await interaction.followup.send(embed=embed, files=archivos)
 
-
 async def agente_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     coincidencias = [
         app_commands.Choice(name=agente, value=agente)
@@ -1360,23 +1391,20 @@ async def agente_autocomplete(interaction: discord.Interaction, current: str) ->
 async def lineups(interaction: discord.Interaction, agente: str):
     await interaction.response.defer()
     url = f"{LINEUPS_BASE}{urllib.parse.quote(agente)}"
-    embed = discord.Embed(
-        title=f"📚 Lineups de {agente}",
-        description=f"Haz clic aquí para [abrir los lineups de {agente}]({url})",
-        color=0x4fd1c5,
-    )
-    await interaction.followup.send(embed=embed)
-
+    # TRANSFORMACIÓN: LA FICHA DE LINEUPS AHORA SE GENERA COMO BANNER DE IMAGEN PIL
+    buf = gen_banner_notificacion(f"📚 LINEUPS DE {agente.upper()}", f"Click para abrir el libro de tácticas de {agente}: {url}", _TEAL)
+    await interaction.followup.send(file=discord.File(fp=buf, filename="lineups.png"))
 
 # ==============================================================================
-# COMANDO IA: /COACH
+# COMANDO IA: /COACH (SDK ACTUALIZADO INTEGRADO EN MAQUINA GRÁFICA DE NEÓN MORADO)
 # ==============================================================================
 @bot.tree.command(name="coach", description="La IA de Gemini analiza sarcásticamente la última partida")
 async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     await interaction.response.defer()
     
     if not GEMINI_API_KEY:
-        await interaction.followup.send("❌ La API Key de Gemini no está configurada en las variables de entorno.")
+        buf = gen_banner_notificacion("❌ ERROR DE LLAVE", "La API Key de Gemini está ausente en el entorno.", _RED_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_key.png"))
         return
 
     server_id = str(interaction.guild_id)
@@ -1393,7 +1421,8 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     )
 
     if not ultima_partida:
-        await interaction.followup.send(f"❌ No tengo partidas registradas de **{nombre}#{tag}** para analizar.")
+        buf = gen_banner_notificacion("❌ AGENTE SIN REGISTRO", f"No constan partidas registradas de {nombre}#{tag} en la base de datos.", _GOLD)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_coach.png"))
         return
 
     k, d, a = ultima_partida["kills"], ultima_partida["deaths"], ultima_partida["assists"]
@@ -1407,7 +1436,7 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     prompt = f"""
     Actúa como un entrenador de eSports de Valorant muy sarcástico, crítico y con humor negro (pero sin insultos graves). 
     Analiza la última partida de este jugador llamado {nombre}.
-    Tus comentarios deben ser breves (máximo 3-4 líneas), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, etc).
+    Tus comentarios deben ser breves (máximo 2 líneas de texto corto), directos al grano y usar jerga de Valorant (aim, entry, lurkear, botfrag, etc).
     
     Estadísticas:
     - Agente: {agente}
@@ -1417,14 +1446,11 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
     - DDA: {dda}
     - HS: {hs}%
     
-    Haz un comentario lapidario. Si jugó muy bien, felicítalo con ironía (ej. "te carrileó la suerte"). Si jugó mal, húndelo (ej. "¿tenías el monitor apagado?").
+    Haz un comentario lapidario corto.
     """
 
-    # Método de acceso oficial con el SDK moderno 'google-genai'
     def ask_gemini_modern():
         client = genai.Client(api_key=GEMINI_API_KEY.strip())
-        
-        # Cambiamos a gemini-2.5-flash (el modelo estándar actual de la API v1)
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
@@ -1433,18 +1459,13 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 
     try:
         respuesta_texto = await asyncio.to_thread(ask_gemini_modern)
-        
-        embed = discord.Embed(
-            title=f"🤖 Análisis de IA para {nombre}",
-            description=f"*{respuesta_texto.strip()}*",
-            color=0x9b59b6
-        )
-        embed.set_footer(text=f"Última partida: {agente} | {k}/{d}/{a} | ACS: {acs}")
-        await interaction.followup.send(embed=embed)
-
+        # TRANSFORMACIÓN: EL ROASTEO DE IA AHORA SE INYECTA DENTRO DE UNA TARJETA GRÁFICA MORADA
+        buf_coach = gen_banner_notificacion(f"🤖 ANALISIS DE IA: {nombre.upper()}", respuesta_texto.strip(), _PURPLE)
+        await interaction.followup.send(file=discord.File(fp=buf_coach, filename="coach_roast.png"))
     except Exception as e:
         print(f"Error con el nuevo SDK de Gemini: {e}")
-        await interaction.followup.send(f"❌ El coach de IA se ha liado con los cables. Detalle: `{str(e)[:100]}`")
+        buf = gen_banner_notificacion("❌ CORTE DE ENLACE IA", f"El coach se ha liado con los cables: {str(e)[:50]}", _RED_G)
+        await interaction.followup.send(file=discord.File(fp=buf, filename="err_gemini.png"))
 
 # ==============================================================================
 # MANEJADORES DE ERRORES GLOBALES
@@ -1452,12 +1473,12 @@ async def coach(interaction: discord.Interaction, nombre: str, tag: str):
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     logging.exception("Slash command error", exc_info=error)
-    msg = f"❌ Error ejecutando el comando: {error}"
+    buf = gen_banner_notificacion("💥 ERROR DE ÁRBOL", f"Fallo de ejecución: {str(error)[:60]}", _RED_G)
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(msg, ephemeral=True)
+            await interaction.followup.send(file=discord.File(fp=buf, filename="fatal_error.png"), ephemeral=True)
         else:
-            await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.response.send_message(file=discord.File(fp=buf, filename="fatal_error.png"), ephemeral=True)
     except Exception:
         pass
 
@@ -1469,7 +1490,5 @@ async def vigilante_partidas_error(error):
 async def resumen_semanal_error(error):
     print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
 
-# ==============================================================================
-# ARRANQUE DEL BOT
-# ==============================================================================
-bot.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(TOKEN)

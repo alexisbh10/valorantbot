@@ -20,7 +20,6 @@ app.add_middleware(
 
 HENRIK_API_KEY = os.getenv("HENRIK_API_KEY", "")
 cache = {}
-
 DB_POOL = None
 
 async def get_db():
@@ -87,7 +86,6 @@ def extract_tracker_like_match_metrics(match, player):
 
         for rnd in all_rounds:
             player_stats = rnd.get("player_stats") or []
-
             my_ps = None
             for ps in player_stats:
                 ps_puuid = ps.get("player_puuid", "") or ""
@@ -103,11 +101,9 @@ def extract_tracker_like_match_metrics(match, player):
             if my_ps is None:
                 continue
 
-            # ADR: La API usa damage_events
             for dmg in (my_ps.get("damage_events") or []):
                 damage_dealt_total += int(dmg.get("damage", 0) or 0)
 
-            # DDA: La API usa damage_events
             for ps in player_stats:
                 ps_puuid_other = ps.get("player_puuid", "") or ""
                 if puuid and ps_puuid_other == puuid:
@@ -117,7 +113,6 @@ def extract_tracker_like_match_metrics(match, player):
                     if puuid and receiver == puuid:
                         damage_received_total += int(dmg.get("damage", 0) or 0)
 
-            # KAST
             my_kills   = my_ps.get("kills", 0)
             my_assists = my_ps.get("assists", 0)
             had_kill   = my_kills > 0
@@ -131,7 +126,6 @@ def extract_tracker_like_match_metrics(match, player):
                 ps_puuid_other = ps.get("player_puuid", "") or ""
                 if puuid and ps_puuid_other == puuid:
                     continue
-                # La API usa kill_events para el array de kills
                 for kill in (ps.get("kill_events") or []):
                     if (kill.get("victim_puuid", "") or "") == puuid:
                         died_this_round = True
@@ -169,7 +163,6 @@ def extract_tracker_like_match_metrics(match, player):
             "kast":                  kast,
             "acs":                   acs,
         }
-
     except Exception as e:
         print(f"[extract_metrics ERROR] {e}\n{traceback.format_exc()}")
         return {
@@ -193,7 +186,6 @@ def analyze_matches(matches, puuid, username, tag):
     kdas_history  = []
     agents_played = []
     total_matches = 0
-    total_matches = 0
     total_kast_rounds = 0
     has_kast_data = False
 
@@ -216,7 +208,6 @@ def analyze_matches(matches, puuid, username, tag):
             bs = stats.get("bodyshots", 0) or 0
             ls = stats.get("legshots", 0)  or 0
 
-            # ¡ESTA ES LA LÍNEA QUE SE HABÍA BORRADO!
             match_metrics = extract_tracker_like_match_metrics(m, player)
             r = match_metrics["rounds_played"] or 0
 
@@ -227,7 +218,6 @@ def analyze_matches(matches, puuid, username, tag):
             bodyshots += bs
             legshots  += ls
             
-            # Sumamos el daño de forma segura
             if match_metrics["damage_dealt_total"] is not None:
                 damage += match_metrics["damage_dealt_total"]
             if match_metrics["damage_received_total"] is not None:
@@ -245,7 +235,6 @@ def analyze_matches(matches, puuid, username, tag):
                 has_kast_data = True
 
             total_matches += 1
-
         except Exception as e:
             print(f"[analyze_matches ERROR en partida] {e}\n{traceback.format_exc()}")
             continue
@@ -343,10 +332,15 @@ def obtener_stats(username, tag, region="eu"):
 
     matches_sucias   = match_json.get("data", []) or []
     inicio_temporada = datetime.datetime(2026, 4, 30, 3, 0, tzinfo=datetime.timezone.utc).timestamp()
+    
     matches = [
         m for m in matches_sucias
         if (m.get("metadata", {}) or {}).get("game_start", 0) >= inicio_temporada
     ]
+
+    if not matches and matches_sucias:
+        print(f"⚠️ Historial de temporada vacío para {real_name}#{real_tag}. Utilizando cola reciente como fallback.")
+        matches = matches_sucias[:5]
 
     last_match   = matches[0] if matches else {}
     mapa         = (last_match.get("metadata") or {}).get("map",  "Desconocido")
@@ -427,7 +421,7 @@ def obtener_stats(username, tag, region="eu"):
 @app.post("/tracker")
 async def tracker(request: Request):
     try:
-        body     = await request.json()
+        body = await request.json()
         username = body.get("username")
         tag      = body.get("tag")
         region   = body.get("region", "eu")
@@ -439,14 +433,12 @@ async def tracker(request: Request):
         if err:
             return {"success": False, "error": err}
         return {"success": True, "stats": stats}
-
     except HTTPException:
         raise
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[/tracker ERROR] {e}\n{tb}")
         return {"success": False, "error": f"Error interno del webhook: {e}"}
-    
 
 # ─── ADMIN ROUTES ───────────────────────────────────────────
 @app.get("/admin/jugadores")
@@ -467,7 +459,6 @@ async def admin_update_jugador(jugador_id: int, req: Request, secret: str = ""):
         "UPDATE jugadores SET nombre=$1, tag=$2, ultimo_rango=$3 WHERE id=$4",
         b["nombre"], b["tag"], b.get("ultimo_rango"), jugador_id
     )
-
     return {"ok": True}
 
 @app.get("/admin/partidas")
@@ -522,10 +513,7 @@ async def admin_delete_partida(match_id: str, nombre: str, tag: str, secret: str
         match_id, nombre, tag)
     return {"ok": True}
 
-
-# === AJUSTE DE PUERTO EXCLUSIVO PARA RENDER ===
 if __name__ == "__main__":
     import uvicorn
-    # Render inyecta el puerto dinámico en la variable PORT. Si no existe, usa 10000.
     puerto = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=puerto)
