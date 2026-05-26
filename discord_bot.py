@@ -810,7 +810,11 @@ async def vigilante_partidas():
     
     for j in jugadores:
         try:
-            nombre, tag = j["nombre"], j["tag"]; s, err = await fetch_stats(nombre, tag); await asyncio.sleep(4); if err or not s or not s.get("last_match"): continue
+            nombre, tag = j["nombre"], j["tag"]
+            s, err = await fetch_stats(nombre, tag)
+            await asyncio.sleep(4)
+            if err or not s or not s.get("last_match"):
+                continue
             lm = s["last_match"]; match_id = lm.get("id"); existe = await bot.db.fetchval("SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre ILIKE $2 AND jugador_tag ILIKE $3", match_id, nombre, tag)
             if match_id and not existe:
                 k, d, a, acs, won, agente, mapa = lm.get("kills", 0), lm.get("deaths", 1), lm.get("assists", 0), lm.get("acs", 0), lm.get("won", False), lm.get("agente", "Desconocido"), s.get("mapa", "Desconocido")
