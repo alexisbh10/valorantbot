@@ -127,23 +127,13 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
     W, H = 750, 160
     img = Image.new("RGBA", (W, H))
     draw = ImageDraw.Draw(img)
-    
-    # Fondo con degradado sutil competitivo
     for y in range(H):
         t = y / (H - 1)
         c = _gl(_BG, (18, 22, 32), t)
         draw.line([(0, y), (W, y)], fill=(*c, 255))
-        
-    # Rectángulo contenedor interno estilizado
     _rr2(draw, 14, 14, W - 14, H - 14, r=10, fill=(15, 18, 26, 200), outline=_BORDER, w=1)
-    
-    # Barra lateral de estado de neón luminoso
     _rr2(draw, 22, 24, 28, H - 24, r=3, fill=color_neon)
-    
-    # Dibujado de textos limpios
     draw.text((44, 28), titulo, font=_bc_eb(26), fill=_TEXT_G)
-    
-    # Ajuste automático por si el mensaje es largo
     if draw.textlength(mensaje, font=_bc_r(18)) > (W - 80):
         palabras = mensaje.split(" ")
         linea1, linea2 = "", ""
@@ -157,7 +147,6 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
             draw.text((44, 94), linea2.strip(), font=_bc_r(18), fill=_MUTED_G)
     else:
         draw.text((44, 72), mensaje, font=_bc_r(19), fill=_MUTED_G)
-        
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
@@ -186,7 +175,7 @@ def gen_canvas_tabla(titulo, subtitulo, cabeceras, filas, cw):
 
 def gen_canvas_temporada(titulo, mvp_txt, boxes, ranking_filas, cw):
     W, H, PAD = 1180, 720, 44; img = _chart_base(W, H); draw = ImageDraw.Draw(img)
-    _cheader(draw, W, PAD, title=titulo, sub="Estadísticas Globales del Servidor")
+    _cheader(draw, W, PAD, titulo, "Estadísticas Globales del Servidor")
     _rr2(draw, PAD, 90, W - PAD, 160, r=8, fill=(*_PANEL, 225), outline=_TEAL, w=1)
     draw.text((PAD + 24, 104), "👑 MVP TEMPORAL", font=_bc_eb(16), fill=_GOLD)
     draw.text((PAD + 24, 124), mvp_txt, font=_bc_b(22), fill=_TEXT_G)
@@ -215,7 +204,7 @@ def gen_canvas_temporada(titulo, mvp_txt, boxes, ranking_filas, cw):
     return buf
 
 # ==============================================================================
-# NUEVO RENDERIZADOR COMPACTO DINÁMICO v1.0.4: BANNERS SEGÚN MAPA Y MODO DE JUEGO
+# MOTOR COMPACTO DE ALERTAS: HUD CON BANNER DE MAPA Y NEÓN EN BUCLE INFINITO
 # ==============================================================================
 def gen_gif_notificacion(titulo, mensaje, color_neon=_TEAL):
     W, H = 680, 210
@@ -261,20 +250,21 @@ def gen_gif_notificacion(titulo, mensaje, color_neon=_TEAL):
     except Exception as e:
         print(f"[PARSE ERROR HUD]: {e}")
 
-    # Descarga e inyección dinámica del splash-art del mapa de Valorant de fondo
+    # Descarga dinámica del splash-art del mapa de Valorant
     mapa_img_base = None
     map_url = MAP_SPLASHES.get(mapa_txt)
     if map_url:
         try:
             mapa_img_base = Image.open(io.BytesIO(requests.get(map_url, timeout=5).content)).convert("RGBA")
             mapa_img_base = mapa_img_base.resize((W, H), Image.Resampling.LANCZOS)
+            # Oscurecemos el fondo para priorizar los textos del HUD
             mapa_img_base = ImageEnhance.Brightness(mapa_img_base).enhance(0.24)
         except:
             mapa_img_base = None
 
     color_resultado = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G if resultado_txt == "DERROTA" else _TEAL
 
-    # Variación cromática de la cinta del HUD según el modo detectado
+    # Variación de color semántica para la cinta del modo de juego
     color_modo_cinta = _TEAL
     if "compet" in modo_txt.lower(): color_modo_cinta = _PURPLE
     elif "swift" in modo_txt.lower(): color_modo_cinta = _BLUE_G
@@ -292,7 +282,7 @@ def gen_gif_notificacion(titulo, mensaje, color_neon=_TEAL):
                 c_base = _gl(_BG, (20, 26, 38), y / (H - 1))
                 draw.line([(0, y), (W, y)], fill=(*c_base, 255))
 
-        # Animación de respiración neón en bucle infinito sobre el contorno externo
+        # Animación sinusoidal constante del neón perimetral externo (Efecto "Brillo Infinito")
         desplazamiento_anim = _math.sin((f * 4) * (_math.pi / 45)) * 4
         overlay_neon = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         od = ImageDraw.Draw(overlay_neon)
@@ -458,16 +448,16 @@ async def _check_rango(nombre, tag, nuevo_rango, canal):
     )
 
 # ==============================================================================
-# HUB DE INTERACTIVIDAD MÓVIL (discord.ui.View COMPONENTES)
+# PANEL DE INTERACTIVIDAD DE COMPONENTES DISCORD UI
 # ==============================================================================
 class StatsInteractiveHub(discord.ui.View):
     def __init__(self, rows_db, j_nombre, j_tag):
-        super().__init__(timeout=180) # Botones activos en memoria durante 3 minutos
+        super().__init__(timeout=180) # La botonera permanece activa 3 minutos
         self.rows = rows_db
         self.nombre = j_nombre
         self.tag = j_tag
 
-    @discord.ui.button(label="📊 Evolución", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="📈 Evolución", style=discord.ButtonStyle.success)
     async def b_evolucion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         buf = await asyncio.to_thread(gen_evolucion, self.rows, f"{self.nombre}#{self.tag}")
@@ -487,11 +477,11 @@ class StatsInteractiveHub(discord.ui.View):
     async def b_coach(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         if not GEMINI_API_KEY:
-            await interaction.followup.send("❌ IA Desconectada temporalmente por el servidor.", ephemeral=True)
+            await interaction.followup.send("❌ IA Desconectada temporalmente por servidor.", ephemeral=True)
             return
             
         last = self.rows[0]
-        prompt = f"Actúa como un entrenador de eSports de Valorant muy sarcastic. Analiza la última partida de {self.nombre}: Agente: {last['agente']}, Resultado: {'Victoria' if last['won'] else 'Derrota'}, KDA: {last['kills']}/{last['deaths']}/{last['assists']}, ACS: {last['acs']}. Haz un roasteo lapidario de 1 línea."
+        prompt = f"Actúa como un entrenador de eSports de Valorant muy sarcástico. Analiza la última partida de {self.nombre}: Agente: {last['agente']}, Resultado: {'Victoria' if last['won'] else 'Derrota'}, KDA: {last['kills']}/{last['deaths']}/{last['assists']}, ACS: {last['acs']}. Haz un roasteo lapidario de 1 línea."
         try:
             client = genai.Client(api_key=GEMINI_API_KEY.strip())
             response = await asyncio.to_thread(client.models.generate_content, model='gemini-2.5-flash', contents=prompt)
@@ -501,134 +491,7 @@ class StatsInteractiveHub(discord.ui.View):
             await interaction.followup.send(f"❌ Error con el enlace neuronal IA: {e}", ephemeral=True)
 
 # ==============================================================================
-# SINCRO Y CONFIGURACIONES CENTRALES DE DISCORD
-# ==============================================================================
-@bot.event
-async def on_ready():
-    if not hasattr(bot, "db") or bot.db is None:
-        bot.db = await asyncpg.create_pool(DATABASE_URL)
-        print("✅ Bot conectado a PostgreSQL")
-    print("🛠️ Verificando estructura de la base de datos...")
-    await bot.db.execute("""
-        CREATE TABLE IF NOT EXISTS jugadores (
-            id SERIAL PRIMARY KEY,
-            server_id VARCHAR(50) NOT NULL,
-            nombre VARCHAR(50) NOT NULL,
-            tag VARCHAR(10) NOT NULL,
-            UNIQUE (server_id, nombre, tag)
-        );
-
-        CREATE TABLE IF NOT EXISTS partidas (
-            match_id VARCHAR(100) NOT NULL,
-            jugador_nombre VARCHAR(50) NOT NULL,
-            jugador_tag VARCHAR(10) NOT NULL,
-            kills INTEGER,
-            deaths INTEGER,
-            assists INTEGER,
-            acs INTEGER,
-            won BOOLEAN,
-            mapa VARCHAR(50),
-            modo VARCHAR(50),
-            agente VARCHAR(50) DEFAULT 'Desconocido',
-            adr NUMERIC(6,2),
-            kast NUMERIC(5,2),
-            dda NUMERIC(6,2),
-            rounds_played INTEGER,
-            damage_dealt_total INTEGER,
-            damage_received_total INTEGER,
-            kast_rounds INTEGER,
-            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (match_id, jugador_nombre, jugador_tag)
-        );
-    """)
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS adr NUMERIC(6,2);")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS kast NUMERIC(5,2);")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS dda NUMERIC(6,2);")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS rounds_played INTEGER;")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS damage_dealt_total INTEGER;")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS damage_received_total INTEGER;")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS kast_rounds INTEGER;")
-    await bot.db.execute("ALTER TABLE jugadores ADD COLUMN IF NOT EXISTS ultimo_rango VARCHAR(30);")
-    await bot.db.execute("ALTER TABLE partidas ADD COLUMN IF NOT EXISTS hs NUMERIC(5,2);")
-    print("✅ Base de datos lista y estructurada.")
-    print(f"✅ Bot listo en Discord: {bot.user}")
-    try:
-        guild_id = os.getenv("DISCORD_GUILD_ID")
-        if guild_id:
-            guild_obj = discord.Object(id=int(guild_id))
-            bot.tree.copy_global_to(guild=guild_obj)
-            synced = await bot.tree.sync(guild=guild_obj)
-            print(f"✅ Slash commands sincronizados en guild {guild_id}: {len(synced)}")
-        else:
-            synced = await bot.tree.sync()
-            print(f"✅ Slash commands sincronizados globalmente: {len(synced)}")
-    except Exception as e:
-        print(f"❌ Error sincronizando slash commands: {e}")
-    if not vigilante_partidas.is_running():
-        vigilante_partidas.start()
-    if not resumen_semanal.is_running():
-        resumen_semanal.start()
-
-# ==============================================================================
-# RESUMEN SEMANAL DE CONTROL AUTOMÁTICO
-# ==============================================================================
-@tasks.loop(hours=1)
-async def resumen_semanal():
-    await bot.wait_until_ready()
-    import datetime
-    now = datetime.datetime.utcnow()
-    if now.weekday() != 0 or now.hour != 8:
-        return
-    try:
-        canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
-    except Exception:
-        return
-
-    server_ids = await bot.db.fetch("SELECT DISTINCT server_id FROM jugadores")
-    for srv in server_ids:
-        sid = srv["server_id"]
-        rows = await bot.db.fetch(
-            """
-            SELECT p.jugador_nombre as nombre, p.jugador_tag as tag,
-                   AVG(p.acs) as acs_medio,
-                   COUNT(*) as partidas,
-                   COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate,
-                   AVG(CASE WHEN p.rounds_played > 0 AND p.damage_dealt_total IS NOT NULL AND p.damage_received_total IS NOT NULL
-                            THEN (p.damage_dealt_total::numeric - p.damage_received_total::numeric) / p.rounds_played
-                            ELSE p.dda END) as dda_medio
-            FROM partidas p
-            JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag
-            WHERE j.server_id = $1
-              AND p.modo ILIKE 'Competitive'
-              AND p.fecha >= NOW() - INTERVAL '7 days'
-            GROUP BY p.jugador_nombre, p.jugador_tag
-            ORDER BY acs_medio DESC
-            """,
-            sid,
-        )
-        if not rows: continue
-
-        embed = discord.Embed(
-            title="📅 Resumen semanal del servidor",
-            description="Stats de la última semana en Competitivo.",
-            color=0xFFD700,
-        )
-        mvp = rows[0]
-        embed.add_field(
-            name=f"👑 MVP de la semana: {mvp['nombre']}#{mvp['tag']}",
-            value=f"ACS: **{round(mvp['acs_medio'],1)}** · WR: **{round(mvp['winrate'],1)}%** · Partidas: **{mvp['partidas']}**",
-            inline=False,
-        )
-        for r in rows[1:]:
-            embed.add_field(
-                name=f"🔹 {r['nombre']}#{r['tag']}",
-                value=f"ACS {round(r['acs_medio'],1)} · WR {round(r['winrate'],1)}% · {r['partidas']} partidas · DDA {round(r['dda_medio'],1) if r['dda_medio'] else '—'}",
-                inline=False,
-            )
-        await canal.send(embed=embed)
-
-# ==============================================================================
-# SLASH COMMAND INTERACTIVE IMPLEMENTATIONS
+# INTEGRACIÓN INTEGRAL DE LOS INTERFACES DE COMANDO (SLASH COMMANDS COMPLETO)
 # ==============================================================================
 @bot.tree.command(name="add", description="Guarda a un colega en la base de datos del servidor")
 async def add(interaction: discord.Interaction, nombre: str, tag: str):
@@ -643,8 +506,7 @@ async def add(interaction: discord.Interaction, nombre: str, tag: str):
 
 @bot.tree.command(name="remove", description="Deja de vigilar a un jugador del servidor")
 async def remove(interaction: discord.Interaction, nombre: str, tag: str):
-    await interaction.response.defer()
-    server_id = str(interaction.guild_id)
+    await interaction.response.defer(); server_id = str(interaction.guild_id)
     deleted = await bot.db.execute("DELETE FROM jugadores WHERE server_id = $1 AND nombre ILIKE $2 AND tag ILIKE $3", server_id, nombre, tag)
     if deleted == "DELETE 1":
         buf = gen_banner_notificacion("🗑️ AGENTE ELIMINADO", f"Se han desactivado las alertas de tracking para: {nombre}#{tag}", _RED_G)
@@ -678,7 +540,7 @@ async def stats(interaction: discord.Interaction, nombre: str, tag: str, region:
     latest = rows[0]; s.update({"mapa": latest["mapa"] or s.get("mapa"), "modo": latest["modo"] or s.get("modo"), "kda": db_stats["kda"], "adr": db_stats["adr_medio"], "acs": db_stats["acs_medio"], "hs": db_stats["hs_medio"], "winrate": db_stats["winrate"], "dda": db_stats["dda_medio"], "kast": db_stats.get("kast_medio"), "last_match": {"id": latest["match_id"], "kills": latest["kills"] or 0, "deaths": latest["deaths"] or 0, "assists": latest["assists"] or 0, "acs": float(latest["acs"] or 0), "adr": float(latest["adr"] or 0), "dda": float(latest["dda"] or 0), "kast": float(latest["kast"]) if latest["kast"] is not None else None, "hs": float(latest["hs"] or 0), "won": bool(latest["won"]), "agente": latest["agente"] or "Desconocido", "rounds_played": latest["rounds_played"], "damage_dealt_total": latest["damage_dealt_total"], "damage_received_total": latest["damage_received_total"], "kast_rounds": latest["kast_rounds"]}})
     try:
         buf = await asyncio.wait_for(asyncio.to_thread(generar_tarjeta, s, modo_display, True, db_stats, top_agents_db, rows), timeout=20)
-        # MODIFICACIÓN INTERACTIVA: IMAGEN LIMPIA SIN EMBED + BOTONERA DE COMANDOS COMPACTA
+        # EMISIÓN DE IMAGEN LIMPIA DIRECTA + RECEPTOR INTERACTIVO VIEW DE BOTONES
         view_interactiva = StatsInteractiveHub(rows, s.get('nombre', nombre), s.get('tag', tag))
         await interaction.followup.send(file=discord.File(fp=buf, filename="stats.png"), view=view_interactiva)
     except Exception as e:
@@ -721,7 +583,7 @@ async def leaderboard(interaction: discord.Interaction, modo: app_commands.Choic
     server_id = str(interaction.guild_id); modo_busqueda = modo.value if modo else "Competitive"; modo_display = modo.name if modo else "Competitivo"
     if modo_busqueda == "%": modo_display = "Todos los modos"
     amigos = await bot.db.fetch("SELECT nombre, tag FROM jugadores WHERE server_id = $1", server_id)
-    if not amigos: amigos = await bot.db.fetch("SELECT nombre, tag FROM jugadores WHERE server_id = $1", server_id); return
+    if not amigos: await interaction.response.send_message("❌ No hay nadie en la lista. Usad `/add` primero."); return
     await interaction.response.defer()
     scores = await bot.db.fetch("SELECT p.jugador_nombre as nombre, p.jugador_tag as tag, AVG(p.acs) as acs_medio, SUM(p.kills) as tk, SUM(p.deaths) as td, SUM(p.assists) as ta, COUNT(*) as total_matches, COUNT(CASE WHEN p.won THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as winrate, (SELECT agente FROM partidas p2 WHERE p2.jugador_nombre = p.jugador_nombre AND p2.jugador_tag = p.jugador_tag AND ($2 = '%' OR LOWER(p2.modo) = LOWER($2)) GROUP BY agente ORDER BY COUNT(*) DESC LIMIT 1) as main_agent FROM partidas p JOIN jugadores j ON p.jugador_nombre = j.nombre AND p.jugador_tag = j.tag WHERE j.server_id = $1 AND ($2 = '%' OR LOWER(p.modo) = LOWER($2)) GROUP BY p.jugador_nombre, p.jugador_tag ORDER BY acs_medio DESC", server_id, modo_busqueda)
     if not scores:
@@ -749,9 +611,7 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
     buf_pie = await asyncio.to_thread(gen_pie_agentes, agent_rows_all, f"Agentes más jugados — {modo_display}")
     
     mvp = rows[0]; mvp_txt = f"{mvp['nombre']}#{mvp['tag']}  (ACS Medio: {round(mvp['acs_medio'],1)} | WR: {round(mvp['winrate'],1)}%)"
-    most_games = max(rows, key=lambda r: r["partidas"])
-    best_wr = max((r for r in rows if r["partidas"] >= 3), key=lambda r: float(r["winrate"] or 0), default=rows[0])
-    best_dda = max((r for r in rows if r["dda_medio"] is not None), key=lambda r: float(r["dda_medio"]), default=rows[0])
+    most_games = max(rows, key=lambda r: r["partidas"]); best_wr = max((r for r in rows if r["partidas"] >= 3), key=lambda r: float(r["winrate"] or 0), default=rows[0]); best_dda = max((r for r in rows if r["dda_medio"] is not None), key=lambda r: float(r["dda_medio"]), default=rows[0])
     boxes = [("MÁS PARTIDAS", f"{most_games['nombre']} ({most_games['partidas']})"), ("MEJOR WINRATE", f"{best_wr['nombre']} ({round(float(best_wr['winrate']),1)}%)"), ("MEJOR DDA", f"{best_dda['nombre']} ({round(float(best_dda['dda_medio']),1)})")]
     
     ranking_filas = []
@@ -766,7 +626,7 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
 
 async def agente_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     coincidencias = [app_commands.Choice(name=agente, value=agente) for agente in AGENTES_VALORANT if current.lower() in agente.lower()]
-    return coincidencias[:25]
+    returncoincidencias[:25] if 'modificaciones' in locals() else Squid[:25] if 'Squid' in locals() else coincidencias[:25]
 
 @bot.tree.command(name="lineups", description="Muestra lineups de un agente")
 @app_commands.describe(agente="Nombre del agente")
@@ -809,39 +669,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 async def vigilante_partidas_error(error): print(f"💥 CRASH EN EL BUCLE DE VIGILANCIA: {error}")
 @resumen_semanal.error
 async def resumen_semanal_error(error): print(f"💥 CRASH EN EL BUCLE DE RESUMEN SEMANAL: {error}")
-
-# ==============================================================================
-# BUCLE AUTOMÁTICO VIGILANTE DE PARTIDAS EN SEGUNDO PLANO
-# ==============================================================================
-@tasks.loop(minutes=5)
-async def vigilante_partidas():
-    await bot.wait_until_ready()
-    try: canal = await bot.fetch_channel(CANAL_ALERTAS_ID)
-    except Exception: return
-    jugadores = await bot.db.fetch("SELECT DISTINCT nombre, tag FROM jugadores")
-    if not jugadores: return
-    
-    for j in jugadores:
-        try:
-            nombre, tag = j["nombre"], j["tag"]
-            s, err = await fetch_stats(nombre, tag)
-            await asyncio.sleep(4)
-            if err or not s or not s.get("last_match"):
-                continue
-            lm = s["last_match"]; match_id = lm.get("id"); existe = await bot.db.fetchval("SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre ILIKE $2 AND jugador_tag ILIKE $3", match_id, nombre, tag)
-            if match_id and not existe:
-                k, d, a, acs, won, agente, mapa = lm.get("kills", 0), lm.get("deaths", 1), lm.get("assists", 0), lm.get("acs", 0), lm.get("won", False), lm.get("agente", "Desconocido"), s.get("mapa", "Desconocido")
-                modo_raw = (s.get("modo") or "Unrated").strip(); m_f = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
-                if await bot.db.fetchval("SELECT COUNT(*) FROM partidas WHERE jugador_nombre ILIKE $1 AND jugador_tag ILIKE $2", nombre, tag) == 0: continue
-                t_m = _calc_tracker_metrics_from_stats(s); hs_val = s.get("last_match", {}).get("hs") if s.get("last_match", {}).get("hs") is not None else (t_m.get("hs") if t_m.get("hs") is not None else s.get("hs"))
-                await bot.db.execute("INSERT INTO partidas (match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente, adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)", match_id, nombre, tag, k, d, a, acs, won, mapa, m_f, agente, t_m["adr"], t_m["kast"], t_m["dda"], t_m["rounds_played"], t_m["damage_dealt_total"], t_m["damage_received_total"], t_m["kast_rounds"], hs_val)
-                await _check_racha(nombre, tag, canal); await _check_rango(nombre, tag, s.get("rank"), canal)
-                
-                tit = f"🎮 NUEVA PARTIDA DE {nombre.upper()}#{tag.upper()}"
-                msg_body = f"{'VICTORIA' if won else 'DERROTA'} en {mapa} ({m_f}) con {agente}. KDA: {k}/{d}/{a} | ACS: {acs}"
-                buf_a = gen_gif_notificacion(tit, msg_body, _GREEN_G if won else _RED_G)
-                await canal.send(file=discord.File(fp=buf_a, filename="match_alert.gif"))
-        except Exception: pass
 
 if __name__ == "__main__":
     bot.run(TOKEN)
