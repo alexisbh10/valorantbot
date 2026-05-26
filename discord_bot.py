@@ -127,13 +127,23 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
     W, H = 750, 160
     img = Image.new("RGBA", (W, H))
     draw = ImageDraw.Draw(img)
+    
+    # Fondo con degradado sutil competitivo
     for y in range(H):
         t = y / (H - 1)
         c = _gl(_BG, (18, 22, 32), t)
         draw.line([(0, y), (W, y)], fill=(*c, 255))
+        
+    # Rectángulo contenedor interno estilizado
     _rr2(draw, 14, 14, W - 14, H - 14, r=10, fill=(15, 18, 26, 200), outline=_BORDER, w=1)
+    
+    # Barra lateral de estado de neón luminoso
     _rr2(draw, 22, 24, 28, H - 24, r=3, fill=color_neon)
+    
+    # Dibujado de textos limpios
     draw.text((44, 28), titulo, font=_bc_eb(26), fill=_TEXT_G)
+    
+    # Ajuste automático por si el mensaje es largo
     if draw.textlength(mensaje, font=_bc_r(18)) > (W - 80):
         palabras = mensaje.split(" ")
         linea1, linea2 = "", ""
@@ -147,6 +157,7 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
             draw.text((44, 94), linea2.strip(), font=_bc_r(18), fill=_MUTED_G)
     else:
         draw.text((44, 72), mensaje, font=_bc_r(19), fill=_MUTED_G)
+        
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=True)
     buf.seek(0)
@@ -175,7 +186,7 @@ def gen_canvas_tabla(titulo, subtitulo, cabeceras, filas, cw):
 
 def gen_canvas_temporada(titulo, mvp_txt, boxes, ranking_filas, cw):
     W, H, PAD = 1180, 720, 44; img = _chart_base(W, H); draw = ImageDraw.Draw(img)
-    _cheader(draw, W, PAD, titulo, "Estadísticas Globales del Servidor")
+    _cheader(draw, W, PAD, title=titulo, sub="Estadísticas Globales del Servidor")
     _rr2(draw, PAD, 90, W - PAD, 160, r=8, fill=(*_PANEL, 225), outline=_TEAL, w=1)
     draw.text((PAD + 24, 104), "👑 MVP TEMPORAL", font=_bc_eb(16), fill=_GOLD)
     draw.text((PAD + 24, 124), mvp_txt, font=_bc_b(22), fill=_TEXT_G)
@@ -480,7 +491,7 @@ class StatsInteractiveHub(discord.ui.View):
             return
             
         last = self.rows[0]
-        prompt = f"Actúa como un entrenador de eSports de Valorant muy sarcástico. Analiza la última partida de {self.nombre}: Agente: {last['agente']}, Resultado: {'Victoria' if last['won'] else 'Derrota'}, KDA: {last['kills']}/{last['deaths']}/{last['assists']}, ACS: {last['acs']}. Haz un roasteo lapidario de 1 línea."
+        prompt = f"Actúa como un entrenador de eSports de Valorant muy sarcastic. Analiza la última partida de {self.nombre}: Agente: {last['agente']}, Resultado: {'Victoria' if last['won'] else 'Derrota'}, KDA: {last['kills']}/{last['deaths']}/{last['assists']}, ACS: {last['acs']}. Haz un roasteo lapidario de 1 línea."
         try:
             client = genai.Client(api_key=GEMINI_API_KEY.strip())
             response = await asyncio.to_thread(client.models.generate_content, model='gemini-2.5-flash', contents=prompt)
@@ -738,7 +749,9 @@ async def temporada(interaction: discord.Interaction, modo: app_commands.Choice[
     buf_pie = await asyncio.to_thread(gen_pie_agentes, agent_rows_all, f"Agentes más jugados — {modo_display}")
     
     mvp = rows[0]; mvp_txt = f"{mvp['nombre']}#{mvp['tag']}  (ACS Medio: {round(mvp['acs_medio'],1)} | WR: {round(mvp['winrate'],1)}%)"
-    most_games = max(rows, key=lambda r: r["partidas"]); best_wr = max((r for r in rows if r["partidas"] >= 3), key=lambda r: float(r["winrate"] or 0), default=rows[0]); best_dda = max((r for r in rows if r["dda_medio"] is not None), key=lambda r: float(r["dda_medio"]), default=rows[0])
+    most_games = max(rows, key=lambda r: r["partidas"])
+    best_wr = max((r for r in rows if r["partidas"] >= 3), key=lambda r: float(r["winrate"] or 0), default=rows[0])
+    best_dda = max((r for r in rows if r["dda_medio"] is not None), key=lambda r: float(r["dda_medio"]), default=rows[0])
     boxes = [("MÁS PARTIDAS", f"{most_games['nombre']} ({most_games['partidas']})"), ("MEJOR WINRATE", f"{best_wr['nombre']} ({round(float(best_wr['winrate']),1)}%)"), ("MEJOR DDA", f"{best_dda['nombre']} ({round(float(best_dda['dda_medio']),1)})")]
     
     ranking_filas = []
