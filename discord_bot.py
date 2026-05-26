@@ -163,132 +163,54 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
     buf.seek(0)
     return buf
 
-# --- NUEVO GENERADOR DE GIFS CON MAPAS Y NEÓN FLUIDO ---
 def gen_gif_notificacion(titulo, mensaje, color_neon=_TEAL):
     W, H = 680, 210
     frames = []
     
-    jugador_name = titulo.replace("🎮 NUEVA PARTIDA DE ", "").replace("🎮 PARTiDA DE ", "")
-    resultado_txt = "PARTIDA"
-    mapa_txt = "Desconocido"
-    modo_txt = "Competitive"
-    agente_txt = "Agente"
-    k, d, a, acs = "0", "0", "0", "0"
+    # Extraemos los datos básicos del mensaje
+    # Formato: "{resultado} en {mapa} ({modo}) con {agente}. KDA: {k}/{d}/{a} | ACS: {acs}"
+    resultado_txt = "VICTORIA" if "VICTORIA" in mensaje else "DERROTA"
+    detalles = mensaje.split(". KDA: ")[0]
+    mapa_txt = detalles.split(" en ")[1].split(" (")[0]
+    stats_txt = mensaje.split(". KDA: ")[1] # "18/12/4 | ACS: 240"
     
-    try:
-        if " en " in mensaje:
-            partes_kda = mensaje.split(". KDA: ")
-            detalles = partes_kda[0]
-            
-            if "VICTORIA" in detalles:
-                resultado_txt = "VICTORIA"
-                detalles = detalles.replace("VICTORIA en ", "")
-            elif "DERROTA" in detalles:
-                resultado_txt = "DERROTA"
-                detalles = detalles.replace("DERROTA en ", "")
-                
-            partes_mapa = detalles.split(" con ")
-            mapa_sucio = partes_mapa[0]
-            if len(partes_mapa) > 1:
-                agente_txt = partes_mapa[1]
-                
-            if " (" in mapa_sucio:
-                ms = mapa_sucio.split(" (")
-                mapa_txt = ms[0].strip()
-                modo_txt = ms[1].replace(")", "").strip()
-            else:
-                mapa_txt = mapa_sucio.strip()
-                
-            if len(partes_kda) > 1:
-                stats_split = partes_kda[1].split(" | ACS: ")
-                kda_nums = stats_split[0].split("/")
-                k, d, a = kda_nums[0], kda_nums[1], kda_nums[2]
-                if len(stats_split) > 1:
-                    acs = stats_split[1]
-    except Exception as e:
-        print(f"[PARSE ERROR HUD]: {e}")
-
-    mapa_img_base = None
-    map_url = MAP_SPLASHES.get(mapa_txt)
-    if map_url:
+    # 1. Cargar fondo del mapa
+    mapa_img = None
+    if mapa_txt in MAP_SPLASHES:
         try:
-            mapa_img_base = Image.open(io.BytesIO(requests.get(map_url, timeout=5).content)).convert("RGBA")
-            mapa_img_base = mapa_img_base.resize((W, H), Image.Resampling.LANCZOS)
-            mapa_img_base = ImageEnhance.Brightness(mapa_img_base).enhance(0.24)
-        except:
-            mapa_img_base = None
+            mapa_img = Image.open(io.BytesIO(requests.get(MAP_SPLASHES[mapa_txt], timeout=5).content)).convert("RGBA")
+            mapa_img = mapa_img.resize((W, H), Image.Resampling.LANCZOS)
+            mapa_img = ImageEnhance.Brightness(mapa_img).enhance(0.15) # Fondo muy oscuro
+        except: pass
 
-    color_resultado = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G if resultado_txt == "DERROTA" else _TEAL
+    # 2. Definir colores
+    color_neon = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G if resultado_txt == "DERROTA" else _TEAL
 
-    color_modo_cinta = _TEAL
-    if "compet" in modo_txt.lower(): color_modo_cinta = _PURPLE
-    elif "swift" in modo_txt.lower(): color_modo_cinta = _BLUE_G
-    elif "unrat" in modo_txt.lower(): color_modo_cinta = _GOLD
-    elif "skirm" in modo_txt.lower(): color_modo_cinta = _RED_G
-
+    # 3. Generar fotogramas para el efecto de doble destello rápido
+    # 8 frames: 2 frames de brillo, 2 de apagado, 2 de brillo, 10 de espera (reposo)
+    secuencia = [255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    
     for f in range(16):
-        frame_img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(frame_img)
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+        if mapa_img: frame.paste(mapa_img, (0, 0))
+        draw = ImageDraw.Draw(frame)
         
-        if mapa_img_base is not None:
-            frame_img.paste(mapa_img_base, (0,0))
-        else:
-            for y in range(H):
-                c_base = _gl(_BG, (20, 26, 38), y / (H - 1))
-                draw.line([(0, y), (W, y)], fill=(*c_base, 255))
-
-        desplazamiento_anim = _math.sin((f * 4) * (_math.pi / 45)) * 4
-        overlay_neon = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay_neon)
-        _rr2(od, 16, 16, W - 16, H - 16, r=12, fill=None, outline=(*color_resultado, int(160 + desplazamiento_anim * 10)), w=2)
-        frame_img = Image.alpha_composite(frame_img, overlay_neon)
-        draw = ImageDraw.Draw(frame_img)
-            
-        _rr2(draw, 18, 18, W - 18, H - 18, r=10, fill=(12, 15, 22, 210), outline=_BORDER, w=1)
-        offset_x = max(0, int(32 - (f * 4))) if f < 8 else 0
+        # Borde exterior de 1 píxel estilo neón
+        _rr2(draw, 1, 1, W-2, H-2, r=0, fill=None, outline=(*color_neon, secuencia[f]), w=1)
         
-        centro_x, centro_y, radio_b = 85, H // 2, 48
-        pulsacion_alfa = int(120 + _math.sin(f * (_math.pi / 8)) * 70)
-        draw.ellipse([centro_x - radio_b, centro_y - radio_b, centro_x + radio_b, centro_y + radio_b], fill=(*color_resultado, 25), outline=(*color_resultado, pulsacion_alfa), width=2)
-        inicial = agente_txt[0].upper() if agente_txt else "V"
-        draw.text((centro_x, centro_y - 2), inicial, font=_bc_eb(42), fill=_TEXT_G, anchor="mm")
+        # Texto VICTORIA/DERROTA HUECO (stroke_width=1, fill=(0,0,0,0))
+        fuente_titulo = _bc_eb(80)
+        draw.text((30, 20), resultado_txt, font=fuente_titulo, 
+                  fill=(0,0,0,0), stroke_width=2, stroke_fill=(*color_neon, secuencia[f]))
         
-        pos_central_x = 160 + offset_x
-        draw.text((pos_central_x, 34), jugador_name.upper(), font=_bc_m(20), fill=_MUTED_G)
-        draw.text((pos_central_x, 58), resultado_txt, font=_bc_eb(46), fill=color_resultado)
+        # Nombre del jugador y Stats
+        draw.text((30, 110), titulo.replace("🎮 NUEVA PARTIDA DE ", ""), font=_bc_m(22), fill=_TEXT_G)
+        draw.text((30, 140), stats_txt, font=_bc_b(24), fill=_GOLD)
         
-        draw.polygon([(pos_central_x, 126), (pos_central_x + 10, 116), (pos_central_x + 280, 116), (pos_central_x + 270, 126)], fill=(*color_modo_cinta, 180))
-        draw.text((pos_central_x + 15, 120), f"{modo_txt.upper()}: {mapa_txt.upper()}", font=_bc_b(13), fill=_BG, anchor="lm")
-        draw.text((pos_central_x + 15, 146), f"AGENTE ACTIVO: {agente_txt.upper()}", font=_bc_r(15), fill=_TEXT_G)
-
-        box_x1, box_y1, box_x2, box_y2 = W - 220, 28, W - 28, H - 28
-        _rr2(draw, box_x1, box_y1, box_x2, box_y2, r=6, fill=(8, 10, 14, 215), outline=_BORDER, w=1)
-        
-        draw.text((box_x1 + 45, 46), "K/D/A", font=_bc_m(14), fill=_MUTED_G, anchor="mm")
-        draw.text((box_x1 + 145, 46), "ACS", font=_bc_m(14), fill=_MUTED_G, anchor="mm")
-        draw.line([(box_x1 + 95, box_y1 + 10), (box_x1 + 95, box_y2 - 10)], fill=(255,255,255,15), width=1)
-        
-        kda_nums_txt = f"{k}/{d}/{a}"
-        fuente_kda = _bc_eb(28) if len(kda_nums_txt) <= 7 else _bc_eb(24)
-        draw.text((box_x1 + 45, 96), kda_nums_txt, font=fuente_kda, fill=_TEXT_G, anchor="mm")
-        draw.text((box_x1 + 145, 96), str(acs), font=_bc_eb(34), fill=_GOLD, anchor="mm")
-        
-        try: ratio = round((int(k) + int(a)) / max(int(d), 1), 2)
-        except: ratio = 0.0
-        draw.text((box_x1 + 95, 142), f"RATIO KDA: {ratio}", font=_bc_r(13), fill=_GREEN_G if ratio >= 1.2 else _MUTED_G, anchor="mm")
-        
-        frames.append(frame_img.convert("P", palette=Image.Palette.ADAPTIVE))
+        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE))
 
     buf = io.BytesIO()
-    frames[0].save(
-        buf,
-        format="GIF",
-        save_all=True,
-        append_images=frames[1:],
-        duration=65,
-        loop=0,
-        optimize=True
-    )
+    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
     buf.seek(0)
     return buf
 
