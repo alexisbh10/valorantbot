@@ -431,8 +431,19 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
             break
     overlay_alpha = {1: 0.82, 2: 0.74, 3: 0.66}.get(subdivision, 0.74)
 
+    # --- ARREGLO DE IMAGEN DE MAPA ---
     mapa_nombre = s.get("mapa", "")
-    map_url = None # Aqui habria que añadir la llamada asincrona si se quiere para el stats
+    map_url = None
+    # Buscamos la URL en tiempo real si no la tenemos
+    try:
+        r = requests.get("https://valorant-api.com/v1/maps", timeout=3)
+        data = r.json()
+        for m in data['data']:
+            if m['displayName'].lower() == mapa_nombre.lower():
+                map_url = m['splash']
+                break
+    except: pass
+    
     fondo_ok = False
     if map_url:
         try:
