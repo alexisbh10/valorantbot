@@ -5,7 +5,7 @@ import urllib.parse
 import traceback
 from fastapi import FastAPI, HTTPException, Request
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncpg
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -334,8 +334,8 @@ def obtener_stats(username, tag, region="eu"):
         return None, f"Error cargando el historial de partidas (HTTP {match_status})"
 
     matches_sucias   = match_json.get("data", []) or []
-    inicio_temporada = datetime.datetime(2026, 4, 30, 3, 0, tzinfo=datetime.timezone.utc).timestamp()
-    
+    inicio_temporada = datetime(2026, 4, 30, 3, 0, tzinfo=timezone.utc).timestamp()    
+
     matches = [
         m for m in matches_sucias
         if (m.get("metadata", {}) or {}).get("game_start", 0) >= inicio_temporada
