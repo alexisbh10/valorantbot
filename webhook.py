@@ -537,7 +537,8 @@ async def admin_insert_partida(req: Request, secret: str = ""):
         b.get("adr"), b.get("kast"), b.get("dda"),
         b.get("rounds_played"), b.get("damage_dealt_total"),
         b.get("damage_received_total"), b.get("kast_rounds"), b.get("hs"),
-        b.get("fecha")
+        datetime.fromisoformat(b["fecha"]) if b.get("fecha") else datetime.utcnow()
+
     )
     return {"ok": True}
 

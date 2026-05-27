@@ -44,19 +44,19 @@ AGENTES_VALORANT = [
     "Viper", "Vyse", "Yoru"
 ]
 
-MAP_SPLASHES = {
-    "Ascent":    "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
-    "Bind":      "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-11ef-ba7ae662c694/splash.png",
-    "Haven":     "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7825631b7aa5/splash.png",
-    "Split":     "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/splash.png",
-    "Fracture":  "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/splash.png",
-    "Breeze":    "https://media.valorant-api.com/maps/2fb9a4fd-47a7-3e68-9c03-d38d1b7caabd/splash.png",
-    "Icebox":    "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
-    "Pearl":     "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/splash.png",
-    "Lotus":     "https://media.valorant-api.com/maps/2fe4ed3a-450a-01be-2339-95a5b1ac8d53/splash.png",
-    "Sunset":    "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
-    "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
-}
+# MAP_SPLASHES = {
+#     "Ascent":    "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
+#     "Bind":      "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-11ef-ba7ae662c694/splash.png",
+#     "Haven":     "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7825631b7aa5/splash.png",
+#     "Split":     "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/splash.png",
+#     "Fracture":  "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/splash.png",
+#     "Breeze":    "https://media.valorant-api.com/maps/2fb9a4fd-47a7-3e68-9c03-d38d1b7caabd/splash.png",
+#     "Icebox":    "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
+#     "Pearl":     "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/splash.png",
+#     "Lotus":     "https://media.valorant-api.com/maps/2fe4ed3a-450a-01be-2339-95a5b1ac8d53/splash.png",
+#     "Sunset":    "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
+#     "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
+# }
 
 _BG      = (10,  11, 17)
 _PANEL   = (15,  17, 25)
@@ -72,6 +72,26 @@ _BLUE_G  = (118, 228, 247)
 CHART_COLORS = [_TEAL, _RED_G, _GOLD, _GREEN_G, _PURPLE, _BLUE_G, (251,211,141), (246,135,179), (154,230,180)]
 
 FONTS_DIR = "assets/fonts"
+
+# Elimina o comenta tu diccionario MAP_SPLASHES actual
+
+async def get_map_splash(mapa_nombre):
+    """Obtiene la URL del splash art actual desde la API oficial."""
+    url_api = "https://valorant-api.com/v1/maps"
+    try:
+        # Hacemos la petición a la API
+        r = await asyncio.to_thread(requests.get, url_api, timeout=5)
+        data = r.json()
+        
+        # Buscamos el mapa por nombre
+        for m in data['data']:
+            if m['displayName'].lower() == mapa_nombre.lower():
+                # Esta es la URL oficial y siempre actualizada
+                return m['splash']
+    except Exception as e:
+        print(f"❌ Error al consultar splash de {mapa_nombre}: {e}")
+        return None
+    return None
 
 def _cargar_fuente_proyecto(nombre_fuente, tamano):
     ruta_completa = f"{FONTS_DIR}/{nombre_fuente}"
@@ -172,21 +192,26 @@ def gen_gif_notificacion(titulo, stats_dict):
 
     resultado_txt = "VICTORIA" if stats_dict.get("won") else "DERROTA"
     color_neon = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G
-    mapa_txt = stats_dict.get("mapa", "Desconocido")
-
+    
+    # Usamos la URL que ya viene validada desde el bucle
+    map_url = stats_dict.get("map_url")
+    
     nombre = titulo.split("#")[0] if "#" in titulo else titulo
     tag = titulo.split("#")[1] if "#" in titulo else ""
 
-    # Fondo base muy oscuro para simular interfaz táctica
+    # Fondo base táctico
     base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
-    if MAP_SPLASHES.get(mapa_txt):
+    
+    # Carga de la imagen de forma síncrona dentro del hilo de procesamiento
+    if map_url:
         try:
-            bg_map = Image.open(io.BytesIO(requests.get(MAP_SPLASHES[mapa_txt], timeout=5).content)).convert("RGBA")
+            response = requests.get(map_url, timeout=5)
+            bg_map = Image.open(io.BytesIO(response.content)).convert("RGBA")
             bg_map = bg_map.resize((W, H), Image.Resampling.LANCZOS)
-            # Oscurecemos masivamente el mapa para que sea un ligero detalle de fondo
             bg_map = ImageEnhance.Brightness(bg_map).enhance(0.18)
             base_bg.paste(bg_map, (0,0), bg_map)
-        except: pass
+        except Exception as e:
+            print(f"Error cargando splash art: {e}")
 
     # Secuencia estroboscópica: ON, OFF, ON, OFF, ON fijo + pulso suave
     alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
