@@ -157,6 +157,7 @@ tr:hover td{background:var(--surface-off)}
     <div class="card">
       <div class="card-head">
         <span class="card-title">🎮 Historial de partidas</span>
+        <button class="btn btn-primary btn-sm" onclick="openModalNuevaPartida()">+ Añadir</button>
         <span id="partidas-count" style="font-size:12px;color:var(--muted)"></span>
       </div>
       <div class="card-body" style="padding:0">
@@ -285,6 +286,70 @@ tr:hover td{background:var(--surface-off)}
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('modal-partida')">Cancelar</button>
       <button class="btn btn-primary" onclick="savePartida()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL NUEVA PARTIDA -->
+<div class="modal-bg" id="modal-nueva-partida">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-head">
+      <span class="modal-title">➕ Añadir partida</span>
+      <button class="btn-icon" onclick="closeModal('modal-nueva-partida')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>Jugador (nombre)</label><input id="new-nombre" placeholder="ej: Andresiito10"></div>
+        <div class="field"><label>Tag</label><input id="new-tag" placeholder="ej: EUW"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="field"><label>Kills</label><input id="new-kills" type="number" min="0" value="0"></div>
+        <div class="field"><label>Deaths</label><input id="new-deaths" type="number" min="0" value="0"></div>
+        <div class="field"><label>Assists</label><input id="new-assists" type="number" min="0" value="0"></div>
+        <div class="field"><label>ACS</label><input id="new-acs" type="number" min="0" value="0"></div>
+        <div class="field"><label>ADR</label><input id="new-adr" type="number" step="0.1" min="0" placeholder="—"></div>
+        <div class="field"><label>HS%</label><input id="new-hs" type="number" step="0.1" min="0" max="100" placeholder="—"></div>
+        <div class="field"><label>KAST%</label><input id="new-kast" type="number" step="0.1" min="0" max="100" placeholder="—"></div>
+        <div class="field"><label>DDA</label><input id="new-dda" type="number" step="0.1" placeholder="—"></div>
+        <div class="field"><label>Rounds</label><input id="new-rounds" type="number" min="0" placeholder="—"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:4px">
+        <div class="field"><label>Mapa</label>
+          <select id="new-mapa">
+            <option>Ascent</option><option>Bind</option><option>Breeze</option><option>Fracture</option>
+            <option>Haven</option><option>Icebox</option><option selected>Lotus</option><option>Pearl</option>
+            <option>Split</option><option>Sunset</option><option>Abyss</option>
+          </select>
+        </div>
+        <div class="field"><label>Modo</label>
+          <select id="new-modo">
+            <option>Competitive</option><option>Unrated</option><option>Swiftplay</option>
+            <option>Skirmish 1v1</option><option>Skirmish 2v2</option>
+          </select>
+        </div>
+        <div class="field"><label>Resultado</label>
+          <select id="new-won">
+            <option value="true">Victoria ✅</option>
+            <option value="false">Derrota ❌</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1"><label>Agente</label>
+          <select id="new-agente">
+            <option>Astra</option><option>Breach</option><option>Brimstone</option><option>Chamber</option>
+            <option>Clove</option><option>Cypher</option><option>Deadlock</option><option>Fade</option>
+            <option>Gekko</option><option>Harbor</option><option>Iso</option><option>Jett</option>
+            <option>KAY/O</option><option>Killjoy</option><option>Neon</option><option>Omen</option>
+            <option>Phoenix</option><option selected>Raze</option><option>Reyna</option><option>Sage</option>
+            <option>Skye</option><option>Sova</option><option>Tejo</option><option>Viper</option>
+            <option>Vyse</option><option>Yoru</option>
+          </select>
+        </div>
+        <div class="field"><label>Fecha</label><input id="new-fecha" type="date"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('modal-nueva-partida')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveNuevaPartida()">Insertar partida</button>
     </div>
   </div>
 </div>
@@ -523,6 +588,52 @@ async function loadResumen(){
 
 // Carga inicial
 loadJugadores();
+
+function openModalNuevaPartida(){
+  document.getElementById('new-nombre').value='';
+  document.getElementById('new-tag').value='';
+  document.getElementById('new-kills').value=0;
+  document.getElementById('new-deaths').value=0;
+  document.getElementById('new-assists').value=0;
+  document.getElementById('new-acs').value=0;
+  ['new-adr','new-hs','new-kast','new-dda','new-rounds'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('new-fecha').value=new Date().toISOString().split('T')[0];
+  openModal('modal-nueva-partida');
+}
+
+async function saveNuevaPartida(){
+  const nombre=document.getElementById('new-nombre').value.trim();
+  const tag=document.getElementById('new-tag').value.trim();
+  if(!nombre||!tag){toast('Nombre y tag obligatorios','err');return;}
+  const ts=document.getElementById('new-fecha').value||new Date().toISOString().split('T')[0];
+  const matchId='manual-'+Date.now();
+  const v=id=>document.getElementById(id).value;
+  const num=id=>{const x=v(id);return x===''?null:parseFloat(x)};
+  const body={
+    match_id:matchId,
+    jugador_nombre:nombre,
+    jugador_tag:tag,
+    kills:parseInt(v('new-kills'))||0,
+    deaths:parseInt(v('new-deaths'))||0,
+    assists:parseInt(v('new-assists'))||0,
+    acs:parseInt(v('new-acs'))||0,
+    won:v('new-won')==='true',
+    mapa:v('new-mapa'),
+    modo:v('new-modo'),
+    agente:v('new-agente'),
+    adr:num('new-adr'),
+    hs:num('new-hs'),
+    kast:num('new-kast'),
+    dda:num('new-dda'),
+    rounds_played:num('new-rounds')?parseInt(v('new-rounds')):null,
+    fecha:ts+'T20:00:00'
+  };
+  await api('POST',`/admin/partidas?secret=${SECRET}`,body);
+  toast('Partida insertada ✅');
+  closeModal('modal-nueva-partida');
+  loadPartidas();
+}
+
 </script>
 </body>
 </html>

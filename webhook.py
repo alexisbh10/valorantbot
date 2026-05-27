@@ -513,6 +513,34 @@ async def admin_delete_partida(match_id: str, nombre: str, tag: str, secret: str
         match_id, nombre, tag)
     return {"ok": True}
 
+@app.post("/admin/partidas")
+async def admin_insert_partida(req: Request, secret: str = ""):
+    if secret != os.getenv("ADMIN_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    b = await req.json()
+    db = await get_db()
+    await db.execute("""
+        INSERT INTO partidas (
+            match_id, jugador_nombre, jugador_tag,
+            kills, deaths, assists, acs, won, mapa, modo, agente,
+            adr, kast, dda, rounds_played, damage_dealt_total,
+            damage_received_total, kast_rounds, hs, fecha
+        ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+            $12,$13,$14,$15,$16,$17,$18,$19,$20
+        )
+    """,
+        b.get("match_id"), b.get("jugador_nombre"), b.get("jugador_tag"),
+        b.get("kills", 0), b.get("deaths", 0), b.get("assists", 0),
+        b.get("acs", 0), b.get("won", False),
+        b.get("mapa"), b.get("modo"), b.get("agente"),
+        b.get("adr"), b.get("kast"), b.get("dda"),
+        b.get("rounds_played"), b.get("damage_dealt_total"),
+        b.get("damage_received_total"), b.get("kast_rounds"), b.get("hs"),
+        b.get("fecha")
+    )
+    return {"ok": True}
+
 if __name__ == "__main__":
     import uvicorn
     puerto = int(os.getenv("PORT", 10000))
