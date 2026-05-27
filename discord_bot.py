@@ -14,6 +14,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from dotenv import load_dotenv
 from google import genai
 
+VALORANT_RED = (255, 70, 85)
+VALORANT_OFFWHITE = (236, 232, 225)
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -58,6 +61,8 @@ _BLUE_G  = (118, 228, 247)
 CHART_COLORS = [_TEAL, _RED_G, _GOLD, _GREEN_G, _PURPLE, _BLUE_G, (251,211,141), (246,135,179), (154,230,180)]
 
 FONTS_DIR = "assets/fonts"
+
+
 
 async def get_map_splash(mapa_nombre):
     """Obtiene la URL del splash art actual desde la API oficial."""
@@ -110,6 +115,7 @@ def _bc_eb(s): return _cargar_fuente_proyecto("BarlowCondensed-ExtraBold.ttf", s
 def _bc_b(s):  return _cargar_fuente_proyecto("BarlowCondensed-Bold.ttf", s)
 def _bc_m(s):  return _cargar_fuente_proyecto("BarlowCondensed-Medium.ttf", s)
 def _bc_r(s):  return _cargar_fuente_proyecto("BarlowCondensed-Regular.ttf", s)
+def _vct_title(s): return _cargar_fuente_proyecto("Anton-Regular.ttf", s)
 
 def mix(c1, c2, t): return tuple(int(c1[i]*(1-t) + c2[i]*t) for i in range(3))
 def _gl(a, b, t): return tuple(int(a[i]*(1-t)+b[i]*t) for i in range(3))
@@ -196,24 +202,24 @@ def gen_gif_notificacion(titulo, stats_dict):
     W, H = 880, 240
     frames, frame_durations = [], []
 
+    resultado_txt = "VICTORIA" if stats_dict.get("won") else "DERROTA"
     won = stats_dict.get("won")
-    racha = stats_dict.get("racha", 0)
     
-    # LÓGICA DE RACHAS INTEGRADAS: Cambia el estilo de la tarjeta entera
-    if racha >= 3:
-        resultado_txt = f"VICTORIA x{racha} 🔥"
-        color_neon = (255, 215, 0)  # Neón Dorado (Gold) para rachas de victorias
-    elif racha <= -3:
-        resultado_txt = f"DERROTA x{abs(racha)} 💀"
-        color_neon = (139, 0, 0)    # Neón Rojo Oscuro/Sangre para rachas de derrotas
+    # Lógica de colores de parpadeo Valorant
+    if won:
+        # Victoria: Parpadeo entre Verde Táctico y Blanco Roto
+        c1 = (0, 220, 100) # Verde táctico brillante
+        c2 = VALORANT_OFFWHITE
     else:
-        resultado_txt = "VICTORIA" if won else "DERROTA"
-        color_neon = (57, 255, 20) if won else (255, 31, 31)
-    
+        # Derrota: Parpadeo entre Rojo Valorant y Naranja de Advertencia
+        c1 = VALORANT_RED
+        c2 = (255, 120, 40) # Naranja alerta
+
     map_url = stats_dict.get("map_url")
     nombre = titulo.split("#")[0] if "#" in titulo else titulo
     tag = titulo.split("#")[1] if "#" in titulo else ""
 
+    # Fondo base táctico (Glassmorphism aplicado)
     base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
     
     if map_url:
@@ -227,57 +233,54 @@ def gen_gif_notificacion(titulo, stats_dict):
         except Exception as e:
             print(f"Error cargando splash art: {e}")
 
-    for i in range(20):
+    # Secuencia estroboscópica mantenida
+    alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
+
+    for i, alpha in enumerate(alphas):
         frame = base_bg.copy()
         draw = ImageDraw.Draw(frame)
-
-        # 1. BORDE DE NEÓN VIAJERO EN LOS 4 LADOS
-        # Dibujamos un borde base tenue para que se note el contraste
-        draw.rectangle([1, 1, W-2, H-2], outline=(*color_neon, 50), width=2)
         
+        # 0. Acento Crítico: Borde interior Rojo Valorant de 1px
+        draw.rectangle([1, 1, W-2, H-2], outline=(*VALORANT_RED, alpha), width=1)
+
+        # 1. Borde de Neón VIAJERO Geométrico
+        # (Sustituye la lógica de círculos por líneas geométricas)
         offset_w = (i * 45) % W
         offset_h = (i * 45) % H
-        
-        # Segmentos brillantes persiguiéndose (Arriba, Abajo, Izquierda, Derecha)
-        draw.line([(offset_w, 1), (offset_w + 150, 1)], fill=(*color_neon, 255), width=3)
-        draw.line([(W - offset_w, H-2), (W - offset_w - 150, H-2)], fill=(*color_neon, 255), width=3)
-        draw.line([(1, H - offset_h), (1, H - offset_h - 150)], fill=(*color_neon, 255), width=3)
-        draw.line([(W-2, offset_h), (W-2, offset_h + 150)], fill=(*color_neon, 255), width=3)
+        draw.line([(offset_w, 1), (offset_w + 150, 1)], fill=(*c1, 255), width=3)
+        draw.line([(W - offset_w, H-2), (W - offset_w - 150, H-2)], fill=(*c1, 255), width=3)
+        draw.line([(1, H - offset_h), (1, H - offset_h - 150)], fill=(*c1, 255), width=3)
+        draw.line([(W-2, offset_h), (W-2, offset_h + 150)], fill=(*c1, 255), width=3)
 
-        # 2. TEXTO DE RESULTADO (Hueco con luz pulsante animada)
-        f_titulo = _bc_eb(90)
-        # alpha_pulsante crea un efecto de "respiración" en la luz del texto de 170 a 255 de intensidad
-        alpha_pulsante = int(170 + 85 * _math.sin(i * 0.4))
-        draw.text((40, 40), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*color_neon, alpha_pulsante))
+        # 2. TEXTO VICTORIA/DERROTA (Fuente Brutalista HUECA)
+        f_titulo = _vct_title(90)
+        col_parpadeo = mix(c1, c2, (math.sin(i * 1.5) + 1) / 2)
+        draw.text((40, 40), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*col_parpadeo, alpha))
 
-        # 3. NOMBRE Y ID/MODO (Debajo del resultado)
-        draw.text((40, 145), nombre.upper(), font=_bc_eb(45), fill=_TEXT_G)
+        # 3. NOMBRE Y MODO/MAPA (Centrado y Enormes)
+        draw.text((W//2, 145), nombre.upper(), font=_vct_title(54), fill=VALORANT_OFFWHITE, anchor="mm")
         if tag:
-            draw.text((40, 195), f"#{tag}  //  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(24), fill=_MUTED_G)
+            draw.text((W//2, 195), f"#{tag}  ///  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(22), fill=_MUTED_G, anchor="mm")
 
-        # 4. PANEL DERECHO: CUADRÍCULA DE ESTADÍSTICAS
+        # 4. PANEL DERECHO DE ESTADÍSTICAS (Mantenido)
         stats_x = W - 320
         draw.line([(stats_x - 30, 40), (stats_x - 30, H - 40)], fill=(255,255,255,30), width=2)
-
         draw.text((stats_x, 45), "K / D / A", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 160, 45), "ACS", font=_bc_m(18), fill=_MUTED_G)
         kda_val = f"{stats_dict.get('k',0)}/{stats_dict.get('d',0)}/{stats_dict.get('a',0)}"
         draw.text((stats_x, 65), kda_val, font=_bc_eb(40), fill=_TEXT_G)
         draw.text((stats_x + 160, 65), str(stats_dict.get('acs', 0)), font=_bc_eb(40), fill=_GOLD)
-
         draw.line([(stats_x, 130), (W - 40, 130)], fill=(255,255,255,20), width=1)
-
         draw.text((stats_x, 145), "ADR", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 100, 145), "KAST", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 200, 145), "HS%", font=_bc_m(18), fill=_MUTED_G)
-        
         draw.text((stats_x, 165), str(stats_dict.get('adr', 0) if stats_dict.get('adr') is not None else 0), font=_bc_eb(30), fill=_TEXT_G)
         kast_v = f"{stats_dict.get('kast', 0)}%" if stats_dict.get('kast') is not None else "N/A"
         draw.text((stats_x + 100, 165), kast_v, font=_bc_eb(30), fill=_TEXT_G)
         draw.text((stats_x + 200, 165), f"{stats_dict.get('hs', 0)}%", font=_bc_eb(30), fill=_TEAL)
 
-        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE))
-        frame_durations.append(50)
+        frames.append(frame.convert("P", palette=ImagePalette.ADAPTIVE))
+        frame_durations.append(50 if i < 4 else 80)
 
     buf = io.BytesIO()
     frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=frame_durations, loop=0, optimize=False)
@@ -288,53 +291,71 @@ def gen_gif_rank_up(titulo, viejo, nuevo, img_vieja_bytes, img_nueva_bytes, es_g
     W, H = 880, 320
     frames, frame_durations = [], []
     
-    # Colores base según las paletas de rangos que ya tienes
     col_v = _rank_palette(viejo)[0]
     col_n = _rank_palette(nuevo)[0]
     
-    # Cargar imágenes desde memoria si existen
     img_v = Image.open(io.BytesIO(img_vieja_bytes)).convert("RGBA") if img_vieja_bytes else None
     img_n = Image.open(io.BytesIO(img_nueva_bytes)).convert("RGBA") if img_nueva_bytes else None
     
+    # Fondo base táctico (Glassmorphism aplicado a Haven)
     base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
-    
-    # 35 frames de pura animación fluida
+    try:
+        r = requests.get("https://valorant-api.com/v1/maps", timeout=3)
+        data = r.json()
+        for m in data['data']:
+            if m['displayName'].lower() == "haven":
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                response = requests.get(m['splash'], headers=headers, timeout=5)
+                bg_map = Image.open(io.BytesIO(response.content)).convert("RGBA")
+                bg_map = bg_map.resize((W, H), Image.Resampling.LANCZOS)
+                base_bg.paste(ImageEnhance.Brightness(bg_map).enhance(0.12), (0,0))
+    except: pass
+
+    # 35 frames de pura animación geométrica
     for i in range(35):
         frame = base_bg.copy()
         draw = ImageDraw.Draw(frame)
         
-        # 1. EFECTO: Ondas expansivas de choque neón desde el centro
+        # 0. Acento Crítico: Borde interior Rojo Valorant
+        draw.rectangle([1, 1, W-2, H-2], outline=(*VALORANT_RED, 120), width=1)
+
+        # 1. EFECTO: Speedlines poligonales y afiladas en lugar de círculos
         mult = 2.5 if es_gran_subida else 1.0
         radius = int((i * 18) * mult) % (W // 2)
         alpha_wave = max(0, int((220 - (radius * 0.6)) * (mult / 2.5 if es_gran_subida else 1.0)))
         
         if alpha_wave > 0:
-            draw.ellipse([W//2 - radius, H//2 - radius, W//2 + radius, H//2 + radius], 
-                         outline=(*col_n, min(alpha_wave, 255)), width=int(2 * mult))
+            # Reemplazamos draw.ellipse por líneas diagonales cruzadas (speedlines tácticas)
+            cx, cy = W//2, H//2 + 15
+            intensidad = min(alpha_wave, 255)
+            # Línea Diagonal Táctica 1 (Arriba Izq - Abajo Der)
+            draw.line([(cx - radius, cy - radius), (cx + radius, cy + radius)], fill=(*col_n, intensidad), width=int(3 * mult))
+            # Línea Diagonal Táctica 2 (Arriba Der - Abajo Izq)
+            draw.line([(cx + radius, cy - radius), (cx - radius, cy + radius)], fill=(*col_n, intensidad), width=int(3 * mult))
 
-        # 2. ANIMACIÓN: Marco exterior dinámico corriendo
+        # 2. Marco exterior dinámico geométrico VIAJERO
         offset = i * 40
         draw.rectangle([0, 0, W-1, H-1], outline=(*col_n, 80), width=1)
         draw.rectangle([offset % W, 0, (offset % W) + 160, 2], fill=(*col_n, 255))
         draw.rectangle([W-1, offset % H, W-1, (offset % H) + 160], fill=(*col_n, 255))
         
-        # 3. TEXTOS DE CABECERA ANIMADOS
-        f_tit = _bc_eb(32)
-        f_rank = _bc_eb(50)
+        # 3. TEXTOS DE CABECERA ANIMADOS (Fuente Brutalista)
+        f_tit = _vct_title(32)
+        f_rank = _vct_title(50)
         
         if i < 12:
             draw.text((W//2, 35), "SINCRO-SISTEMA DE COMPETICIÓN...", font=f_tit, fill=_MUTED_G, anchor="mm")
         else:
             txt_asc = "👑 ¡UPGRADE CRÍTICO DE LIGA! 👑" if es_gran_subida else "📈 ¡ASCENSO DE RANGO! 🎉"
             alpha_flash = int(180 + 75 * _math.sin(i * 0.5))
+            # Título principal brutalista a color neón
             draw.text((W//2, 35), txt_asc, font=f_tit, fill=(*col_n, alpha_flash), anchor="mm")
             
-        # 4. TRANSFROMACIÓN / MORPHING DE ICONOS
+        # 4. TRANSFROMACIÓN / MORPHING DE ICONOS Y UNIFICACIÓN DE TEXTOS
         cx, cy = W//2, H//2 + 15
         size = 130
         
         if i < 15:
-            # Fase 1: Muestra el rango viejo desvaneciéndose progresivamente
             if img_v:
                 alpha_v = max(0, int(255 * (1 - (i / 15))))
                 img_v_scaled = img_v.resize((size, size), Image.Resampling.LANCZOS)
@@ -342,9 +363,9 @@ def gen_gif_rank_up(titulo, viejo, nuevo, img_vieja_bytes, img_nueva_bytes, es_g
                 a = a.point(lambda p: int(p * (alpha_v / 255.0)))
                 img_v_faded = Image.merge("RGBA", (r, g, b, a))
                 frame.paste(img_v_faded, (cx - size//2, cy - size//2), mask=a)
-            draw.text((cx, cy + size//2 + 25), viejo.upper(), font=f_rank, fill=_TEXT_G, anchor="mm")
+            # Texto rango viejo brutalista desvaneciéndose
+            draw.text((cx, cy + size//2 + 25), viejo.upper(), font=f_rank, fill=(*VALORANT_OFFWHITE, alpha_wave if i > 0 else 255), anchor="mm")
         else:
-            # Fase 2: Aparece el rango nuevo escalando de pequeño a grande con impacto
             t = (i - 15) / 20  # Normalizado 0.0 a 1.0
             scale = 0.4 + 0.6 * _math.sin(t * _math.pi / 2)
             current_size = max(10, int(size * scale))
@@ -355,10 +376,11 @@ def gen_gif_rank_up(titulo, viejo, nuevo, img_vieja_bytes, img_nueva_bytes, es_g
                     # En subidas gordas, aumentamos el brillo lumínico del icono
                     img_n_scaled = ImageEnhance.Brightness(img_n_scaled).enhance(1.25)
                 frame.paste(img_n_scaled, (cx - current_size//2, cy - current_size//2), mask=img_n_scaled.split()[3])
-                
+            
+            # Texto rango nuevo brutalista a color neón centrado y unificado
             draw.text((cx, cy + size//2 + 25), nuevo.upper(), font=f_rank, fill=(*col_n, 255), anchor="mm")
             
-        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE))
+        frames.append(frame.convert("P", palette=ImagePalette.ADAPTIVE))
         frame_durations.append(55)
 
     buf = io.BytesIO()
