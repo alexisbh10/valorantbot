@@ -173,20 +173,13 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
 def gen_gif_notificacion(titulo, stats_dict):
     W, H = 880, 240
     frames, frame_durations = [], []
-
     resultado_txt = "VICTORIA" if stats_dict.get("won") else "DERROTA"
-    color_neon = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G
-    
-    # Usamos la URL que ya viene validada desde el bucle
+    color_neon = (57, 255, 20) if stats_dict.get("won") else (255, 31, 31)
     map_url = stats_dict.get("map_url")
-    
     nombre = titulo.split("#")[0] if "#" in titulo else titulo
     tag = titulo.split("#")[1] if "#" in titulo else ""
-
-    # Fondo base táctico
     base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
     
-    # Carga de la imagen de forma síncrona dentro del hilo de procesamiento
     if map_url:
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -198,61 +191,40 @@ def gen_gif_notificacion(titulo, stats_dict):
         except Exception as e:
             print(f"Error cargando splash art: {e}")
 
-    # Secuencia estroboscópica: ON, OFF, ON, OFF, ON fijo + pulso suave
-    alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
-
-    for i, alpha in enumerate(alphas):
+    for i in range(20):
         frame = base_bg.copy()
         draw = ImageDraw.Draw(frame)
+        offset = i * 45
+        draw.rectangle([0, 0, W-1, H-1], outline=(*color_neon, 255), width=2)
+        draw.rectangle([offset % W, 0, (offset % W) + 120, 2], fill=(*color_neon, 255))
+        draw.rectangle([W-1, offset % H, W-1, (offset % H) + 120], fill=(*color_neon, 255))
 
-        # BORDE DE NEÓN DINÁMICO (Borde grueso difuminado debajo, y borde de 1px brillante encima)
-        if alpha > 0:
-            draw.rectangle([1, 1, W-2, H-2], outline=(*color_neon, int(alpha*0.3)), width=4)
-            draw.rectangle([0, 0, W-1, H-1], outline=(*color_neon, alpha), width=1)
-
-        # TEXTO DE RESULTADO HUECO
         f_titulo = _bc_eb(90)
-        # fill transparente y stroke de color neón = texto vaciado
-        draw.text((40, 50), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=2, stroke_fill=(*color_neon, alpha))
-
-        # PANEL CENTRAL: JUGADOR Y MAPA
-        w_vic = draw.textlength(resultado_txt, font=f_titulo)
-        x_nombre = 40 + w_vic + 30
-        draw.text((x_nombre, 70), nombre.upper(), font=_bc_eb(45), fill=_TEXT_G)
+        alpha_pulsante = int(200 + 55 * _math.sin(i * 0.3))
+        draw.text((40, 40), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*color_neon, alpha_pulsante))
+        draw.text((40, 145), nombre.upper(), font=_bc_eb(45), fill=_TEXT_G)
         if tag:
-            draw.text((x_nombre, 120), f"#{tag}  //  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(22), fill=_MUTED_G)
+            draw.text((40, 195), f"#{tag}  //  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(24), fill=_MUTED_G)
 
-        # PANEL DERECHO: CUADRÍCULA DE ESTADÍSTICAS PURA
         stats_x = W - 320
-        # Línea divisoria principal
         draw.line([(stats_x - 30, 40), (stats_x - 30, H - 40)], fill=(255,255,255,30), width=2)
-
-        # Fila 1 de Stats
         draw.text((stats_x, 45), "K / D / A", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 160, 45), "ACS", font=_bc_m(18), fill=_MUTED_G)
         kda_val = f"{stats_dict.get('k',0)}/{stats_dict.get('d',0)}/{stats_dict.get('a',0)}"
         draw.text((stats_x, 65), kda_val, font=_bc_eb(40), fill=_TEXT_G)
         draw.text((stats_x + 160, 65), str(stats_dict.get('acs', 0)), font=_bc_eb(40), fill=_GOLD)
-
-        # Separador interno
         draw.line([(stats_x, 130), (W - 40, 130)], fill=(255,255,255,20), width=1)
-
-        # Fila 2 de Stats
         draw.text((stats_x, 145), "ADR", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 100, 145), "KAST", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 200, 145), "HS%", font=_bc_m(18), fill=_MUTED_G)
-        
         draw.text((stats_x, 165), str(stats_dict.get('adr', 0) if stats_dict.get('adr') is not None else 0), font=_bc_eb(30), fill=_TEXT_G)
         kast_v = f"{stats_dict.get('kast', 0)}%" if stats_dict.get('kast') is not None else "N/A"
         draw.text((stats_x + 100, 165), kast_v, font=_bc_eb(30), fill=_TEXT_G)
         draw.text((stats_x + 200, 165), f"{stats_dict.get('hs', 0)}%", font=_bc_eb(30), fill=_TEAL)
-
-        frames.append(frame)
-        # ACELERACIÓN DE FRAMES PARA EL PARPADEO (50ms en los destellos, 80ms en reposo)
-        frame_durations.append(50 if i < 4 else 80)
+        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE))
+        frame_durations.append(50)
 
     buf = io.BytesIO()
-    # Guardamos los frames generados como secuencia GIF asíncrona
     frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=frame_durations, loop=0, optimize=False)
     buf.seek(0)
     return buf
