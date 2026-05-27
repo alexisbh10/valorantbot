@@ -1183,7 +1183,7 @@ async def vigilante_partidas():
     if not jugadores: return
 
     # Función asíncrona para no bloquear el bucle al procesar cada jugador
-   async def procesar_jugador(j):
+    async def procesar_jugador(j):
         try:
             nombre, tag = j["nombre"], j["tag"]
             s, err = await fetch_stats(nombre, tag)
@@ -1271,6 +1271,8 @@ async def vigilante_partidas():
         except Exception as e:
             print(f"❌ Error general procesando a {j['nombre']}#{j['tag']}: {e}")
 
+    # Ejecutamos las llamadas asíncronas de todos los jugadores de tu base de datos de manera concurrente
+    await asyncio.gather(*(procesar_jugador(j) for j in jugadores))
 
 @tasks.loop(hours=1)
 async def resumen_semanal():
