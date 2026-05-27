@@ -985,7 +985,7 @@ async def on_ready():
 # ==============================================================================
 # TAREAS EN SEGUNDO PLANO (LOOPS)
 # ==============================================================================
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=1)
 async def vigilante_partidas():
     await bot.wait_until_ready()
     try:
@@ -1007,7 +1007,7 @@ async def vigilante_partidas():
             nombre, tag = j["nombre"], j["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            await asyncio.sleep(4)
+            await asyncio.sleep(2)
             
             if err or not s or not s.get("last_match"):
                 continue
