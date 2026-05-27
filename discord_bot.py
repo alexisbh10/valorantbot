@@ -10,7 +10,7 @@ import asyncpg
 import io
 import math as _math
 from collections import Counter
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImagePalette
 from dotenv import load_dotenv
 from google import genai
 
