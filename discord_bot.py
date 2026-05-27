@@ -1227,7 +1227,6 @@ async def vigilante_partidas():
 
                 if es_primera_vez:
                     print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control.")
-                    return
 
                 # Obtenemos la racha actual SIN enviar mensaje por separado
                 racha_num, racha_tipo = await _check_racha(nombre, tag)
