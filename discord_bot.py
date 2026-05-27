@@ -115,7 +115,11 @@ def _bc_eb(s): return _cargar_fuente_proyecto("BarlowCondensed-ExtraBold.ttf", s
 def _bc_b(s):  return _cargar_fuente_proyecto("BarlowCondensed-Bold.ttf", s)
 def _bc_m(s):  return _cargar_fuente_proyecto("BarlowCondensed-Medium.ttf", s)
 def _bc_r(s):  return _cargar_fuente_proyecto("BarlowCondensed-Regular.ttf", s)
-def _vct_title(s): return _cargar_fuente_proyecto("Anton-Regular.ttf", s)
+def _vct_title(s): 
+    try:
+        return _cargar_fuente_proyecto("Anton-Regular.ttf", s)
+    except OSError:
+        return _bc_eb(s)
 
 def mix(c1, c2, t): return tuple(int(c1[i]*(1-t) + c2[i]*t) for i in range(3))
 def _gl(a, b, t): return tuple(int(a[i]*(1-t)+b[i]*t) for i in range(3))
@@ -284,7 +288,7 @@ def gen_gif_notificacion(titulo, stats_dict):
         draw.text((stats_x + 100, 165), kast_v, font=_bc_eb(30), fill=_TEXT_G)
         draw.text((stats_x + 200, 165), f"{stats_dict.get('hs', 0)}%", font=_bc_eb(30), fill=_TEAL)
 
-        frames.append(frame.convert("P", palette=ImagePalette.ADAPTIVE))
+        frames.append(frame.convert("P", palette=Image.ADAPTIVE))
         frame_durations.append(50 if i < 4 else 80)
 
     buf = io.BytesIO()
@@ -385,7 +389,7 @@ def gen_gif_rank_up(titulo, viejo, nuevo, img_vieja_bytes, img_nueva_bytes, es_g
             # Texto rango nuevo brutalista a color neón centrado y unificado
             draw.text((cx, cy + size//2 + 25), nuevo.upper(), font=f_rank, fill=(*col_n, 255), anchor="mm")
             
-        frames.append(frame.convert("P", palette=ImagePalette.ADAPTIVE))
+        frames.append(frame.convert("P", palette=Image.ADAPTIVE))
         frame_durations.append(55)
 
     buf = io.BytesIO()
@@ -1179,7 +1183,7 @@ async def vigilante_partidas():
     if not jugadores: return
 
     # Función asíncrona para no bloquear el bucle al procesar cada jugador
-    async def procesar_jugador(j):
+   async def procesar_jugador(j):
         try:
             nombre, tag = j["nombre"], j["tag"]
             s, err = await fetch_stats(nombre, tag)
@@ -1192,87 +1196,81 @@ async def vigilante_partidas():
                 if not match_id:
                     continue
                 
-                existe = await bot.db.fetchval(
-                    "SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre ILIKE $2 AND jugador_tag ILIKE $3",
-                    match_id, nombre, tag,
-                )
-                
-                if not existe:
-                    k = lm.get("kills", 0)
-                    d = lm.get("deaths", 1)
-                    a = lm.get("assists", 0)
-                    acs = lm.get("acs", 0)
-                    won = lm.get("won", False)
-                    agente = lm.get("agente", "Desconocido")
-                    mapa = lm.get("mapa", "Desconocido")
-                    
-                    modo_raw = (lm.get("modo") or "Unrated").strip()
-                    modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
-                    
-                    total_partidas = await bot.db.fetchval(
-                        "SELECT COUNT(*) FROM partidas WHERE jugador_nombre ILIKE $1 AND jugador_tag ILIKE $2",
-                        nombre, tag,
+                # SEGURO DENTRO DEL BUCLE
+                try:
+                    existe = await bot.db.fetchval(
+                        "SELECT 1 FROM partidas WHERE match_id = $1 AND jugador_nombre ILIKE $2 AND jugador_tag ILIKE $3",
+                        match_id, nombre, tag,
                     )
-                    es_primera_vez = (total_partidas == 0)
-
-                    # Los datos ya vienen calculados y limpios desde nuestro nuevo webhook
-                    adr_val = lm.get("adr")
-                    kast_val = lm.get("kast")
-                    dda_val = lm.get("dda")
-                    hs_val = lm.get("hs")
                     
-                    await bot.db.execute(
-                        """
-                        INSERT INTO partidas (
-                            match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente,
-                            adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs
+                    if not existe:
+                        k = lm.get("kills", 0)
+                        d = lm.get("deaths", 1)
+                        a = lm.get("assists", 0)
+                        acs = lm.get("acs", 0)
+                        won = lm.get("won", False)
+                        agente = lm.get("agente", "Desconocido")
+                        mapa = lm.get("mapa", "Desconocido")
+                        
+                        modo_raw = (lm.get("modo") or "Unrated").strip()
+                        modo_formateado = "Competitive" if modo_raw.lower() == "competitive" else modo_raw
+                        
+                        total_partidas = await bot.db.fetchval(
+                            "SELECT COUNT(*) FROM partidas WHERE jugador_nombre ILIKE $1 AND jugador_tag ILIKE $2",
+                            nombre, tag,
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-                        """,
-                        match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente,
-                        adr_val, kast_val, dda_val,
-                        lm.get("rounds_played"), lm.get("damage_dealt_total"),
-                        lm.get("damage_received_total"), lm.get("kast_rounds"),
-                        hs_val,
-                    )
+                        es_primera_vez = (total_partidas == 0)
 
-                    if es_primera_vez:
-                        print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control.")
-                    else:
-                        racha_num, racha_tipo = await _check_racha(nombre, tag)
+                        adr_val = lm.get("adr")
+                        kast_val = lm.get("kast")
+                        dda_val = lm.get("dda")
+                        hs_val = lm.get("hs")
                         
-                        nuevo_rango = s.get("rank")
-                        await _check_rango(nombre, tag, nuevo_rango, canal)
+                        await bot.db.execute(
+                            """
+                            INSERT INTO partidas (
+                                match_id, jugador_nombre, jugador_tag, kills, deaths, assists, acs, won, mapa, modo, agente,
+                                adr, kast, dda, rounds_played, damage_dealt_total, damage_received_total, kast_rounds, hs
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                            """,
+                            match_id, nombre, tag, k, d, a, acs, won, mapa, modo_formateado, agente,
+                            adr_val, kast_val, dda_val,
+                            lm.get("rounds_played"), lm.get("damage_dealt_total"),
+                            lm.get("damage_received_total"), lm.get("kast_rounds"),
+                            hs_val,
+                        )
 
-                        tit = f"{nombre.upper()}#{tag.upper()}"
-                        map_url = await get_map_splash(mapa)
-                        
-                        stats_dict = {
-                            "won": won,
-                            "mapa": mapa,
-                            "modo": modo_formateado,
-                            "agente": agente,
-                            "k": k, "d": d, "a": a,
-                            "acs": acs,
-                            "adr": adr_val,
-                            "kast": kast_val,
-                            "hs": hs_val,
-                            "map_url": map_url,
-                            "racha": racha_num if racha_tipo == "W" else (racha_num * -1)
-                        }
-                        
-                        buf_alert = await asyncio.to_thread(gen_gif_notificacion, tit, stats_dict)
-                        await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.gif"))
-                        print(f"✅ Alerta GIF visual de {nombre}#{tag} enviada correctamente a Discord (Partida: {match_id}).")
-                        
-                        # Pequeña pausa para no floodear Discord si entran 5 partidas de golpe
-                        await asyncio.sleep(2)
-                        
+                        if es_primera_vez:
+                            print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control.")
+                        else:
+                            racha_num, racha_tipo = await _check_racha(nombre, tag)
+                            nuevo_rango = s.get("rank")
+                            await _check_rango(nombre, tag, nuevo_rango, canal)
+
+                            tit = f"{nombre.upper()}#{tag.upper()}"
+                            map_url = await get_map_splash(mapa)
+                            
+                            stats_dict = {
+                                "won": won, "mapa": mapa, "modo": modo_formateado, "agente": agente,
+                                "k": k, "d": d, "a": a, "acs": acs, "adr": adr_val, "kast": kast_val, "hs": hs_val,
+                                "map_url": map_url, "racha": racha_num if racha_tipo == "W" else (racha_num * -1)
+                            }
+                            
+                            buf_alert = await asyncio.to_thread(gen_gif_notificacion, tit, stats_dict)
+                            await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.gif"))
+                            print(f"✅ Alerta GIF visual de {nombre}#{tag} enviada correctamente a Discord (Partida: {match_id}).")
+                            
+                            await asyncio.sleep(2)
+                            
+                except Exception as e_inner:
+                    # SI EL GIF FALLA, AVISAMOS PERO EL BUCLE CONTINÚA CON LA SIGUIENTE PARTIDA
+                    print(f"⚠️ Error procesando la partida {match_id} de {nombre}#{tag}: {e_inner}")
+        
+        # AQUÍ CERRAMOS EL TRY PRINCIPAL DE LA FUNCIÓN
         except Exception as e:
-            print(f"❌ Error procesando a {j['nombre']}#{j['tag']}: {e}")
+            print(f"❌ Error general procesando a {j['nombre']}#{j['tag']}: {e}")
 
-    # Ejecutamos las llamadas asíncronas de todos los jugadores de tu base de datos de manera concurrente
-    await asyncio.gather(*(procesar_jugador(j) for j in jugadores))
 
 @tasks.loop(hours=1)
 async def resumen_semanal():
