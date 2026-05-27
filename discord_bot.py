@@ -44,20 +44,6 @@ AGENTES_VALORANT = [
     "Viper", "Vyse", "Yoru"
 ]
 
-# MAP_SPLASHES = {
-#     "Ascent":    "https://media.valorant-api.com/maps/7eaecc1b-4337-bbf6-6ab9-04b8f06b3319/splash.png",
-#     "Bind":      "https://media.valorant-api.com/maps/2c9d57ec-4431-9c5e-11ef-ba7ae662c694/splash.png",
-#     "Haven":     "https://media.valorant-api.com/maps/2bee0dc9-4ffe-519b-1cbd-7825631b7aa5/splash.png",
-#     "Split":     "https://media.valorant-api.com/maps/d960549e-485c-e861-8d71-aa9d1aed12a2/splash.png",
-#     "Fracture":  "https://media.valorant-api.com/maps/b529448b-4d60-346e-e89e-00a4c527a405/splash.png",
-#     "Breeze":    "https://media.valorant-api.com/maps/2fb9a4fd-47a7-3e68-9c03-d38d1b7caabd/splash.png",
-#     "Icebox":    "https://media.valorant-api.com/maps/e2ad5c54-4114-a870-9641-8ea21279579a/splash.png",
-#     "Pearl":     "https://media.valorant-api.com/maps/fd267378-4d1d-484f-ff52-77821ed10dc2/splash.png",
-#     "Lotus":     "https://media.valorant-api.com/maps/2fe4ed3a-450a-01be-2339-95a5b1ac8d53/splash.png",
-#     "Sunset":    "https://media.valorant-api.com/maps/92584fbe-486a-b1b2-9faa-39b0f486b498/splash.png",
-#     "Abyss":     "https://media.valorant-api.com/maps/224b0a95-48b9-f703-1bd8-67aca101a61f/splash.png",
-# }
-
 _BG      = (10,  11, 17)
 _PANEL   = (15,  17, 25)
 _BORDER  = (42,  48, 67)
@@ -72,8 +58,6 @@ _BLUE_G  = (118, 228, 247)
 CHART_COLORS = [_TEAL, _RED_G, _GOLD, _GREEN_G, _PURPLE, _BLUE_G, (251,211,141), (246,135,179), (154,230,180)]
 
 FONTS_DIR = "assets/fonts"
-
-# Elimina o comenta tu diccionario MAP_SPLASHES actual
 
 async def get_map_splash(mapa_nombre):
     """Obtiene la URL del splash art actual desde la API oficial."""
@@ -205,7 +189,8 @@ def gen_gif_notificacion(titulo, stats_dict):
     # Carga de la imagen de forma síncrona dentro del hilo de procesamiento
     if map_url:
         try:
-            response = requests.get(map_url, timeout=5)
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(map_url, headers=headers, timeout=5)
             bg_map = Image.open(io.BytesIO(response.content)).convert("RGBA")
             bg_map = bg_map.resize((W, H), Image.Resampling.LANCZOS)
             bg_map = ImageEnhance.Brightness(bg_map).enhance(0.18)
@@ -393,10 +378,10 @@ async def _check_racha(nombre, tag, canal):
     if len(ultimas) < 3: return
     resultados = [r["won"] for r in ultimas]
     if all(resultados[:3]):
-        buf = gen_gif_notificacion("🔥 JUGADOR EN RACHA", f"¡{nombre}#{tag} lleva 3 victorias seguidas! Tiembla VCT.", _GREEN_G)
+        buf = gen_gif_notificacion("🔥 JUGADOR EN RACHA", {"won": True, "k":0, "d":0, "a":0}) # Dummy para la racha
         await canal.send(file=discord.File(fp=buf, filename="racha.gif"))
     elif not any(resultados[:3]):
-        buf = gen_gif_notificacion("💀 RACHA DE DERROTAS", f"{nombre}#{tag} lleva 3 derrotas seguidas. Alguien que le esconda el ratón.", _RED_G)
+        buf = gen_gif_notificacion("💀 RACHA DE DERROTAS", {"won": False, "k":0, "d":0, "a":0}) # Dummy para la racha
         await canal.send(file=discord.File(fp=buf, filename="derrotas.gif"))
 
 async def _check_rango(nombre, tag, nuevo_rango, canal):
@@ -418,11 +403,11 @@ async def _check_rango(nombre, tag, nuevo_rango, canal):
         ni = ranks_order.index(nuevo_rango) if nuevo_rango in ranks_order else -1
         if vi >= 0 and ni >= 0:
             if ni > vi:
-                buf = gen_gif_notificacion("📈 ¡UPGRADE DE RANGO!", f"{nombre}#{tag} ha ascendido: {viejo} ➔ {nuevo_rango} 🎉", _GREEN_G)
-                await canal.send(file=discord.File(fp=buf, filename="rank_up.gif"))
+                buf = gen_banner_notificacion("📈 ¡UPGRADE DE RANGO!", f"{nombre}#{tag} ha ascendido: {viejo} ➔ {nuevo_rango} 🎉", _GREEN_G)
+                await canal.send(file=discord.File(fp=buf, filename="rank_up.png"))
             else:
-                buf = gen_gif_notificacion("📉 ¡DOWNGRADE DE RANGO!", f"{nombre}#{tag} ha caido de rango: {viejo} ➔ {nuevo_rango} 😬", _RED_G)
-                await canal.send(file=discord.File(fp=buf, filename="rank_down.gif"))
+                buf = gen_banner_notificacion("📉 ¡DOWNGRADE DE RANGO!", f"{nombre}#{tag} ha caido de rango: {viejo} ➔ {nuevo_rango} 😬", _RED_G)
+                await canal.send(file=discord.File(fp=buf, filename="rank_down.png"))
     await bot.db.execute(
         "UPDATE jugadores SET ultimo_rango = $1 WHERE nombre ILIKE $2 AND tag ILIKE $3",
         nuevo_rango, nombre, tag,
@@ -475,7 +460,7 @@ def generar_tarjeta(s, modo_display, tiene_datos_db, db_stats, top_agents_db, ma
     overlay_alpha = {1: 0.82, 2: 0.74, 3: 0.66}.get(subdivision, 0.74)
 
     mapa_nombre = s.get("mapa", "")
-    map_url = MAP_SPLASHES.get(mapa_nombre)
+    map_url = None # Aqui habria que añadir la llamada asincrona si se quiere para el stats
     fondo_ok = False
     if map_url:
         try:
@@ -1027,15 +1012,14 @@ async def vigilante_partidas():
 
     if not jugadores: return
 
-    for j in jugadores:
+    # Función asíncrona para no bloquear el bucle al procesar cada jugador
+    async def procesar_jugador(j):
         try:
             nombre, tag = j["nombre"], j["tag"]
             s, err = await fetch_stats(nombre, tag)
             
-            await asyncio.sleep(2)
-            
             if err or not s or not s.get("last_match"):
-                continue
+                return
 
             lm = s["last_match"]
             match_id = lm.get("id")
@@ -1082,24 +1066,42 @@ async def vigilante_partidas():
 
                 if es_primera_vez:
                     print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control.")
-                    continue
+                    return
 
                 await _check_racha(nombre, tag, canal)
                 nuevo_rango = s.get("rank")
                 await _check_rango(nombre, tag, nuevo_rango, canal)
 
                 # TRANSFORMACIÓN: LA ALERTA AUTOMÁTICA AHORA ES UN GIF ANIMADO
-                resultado = "VICTORIA" if won else "DERROTA"
-                color_neon = _GREEN_G if won else _RED_G
-                tit = f"🎮 NUEVA PARTIDA DE {nombre.upper()}#{tag.upper()}"
-                msg_body = f"{resultado} en {mapa} ({modo_formateado}) con {agente}. KDA: {k}/{d}/{a} | ACS: {acs}"
+                tit = f"{nombre.upper()}#{tag.upper()}"
                 
-                buf_alert = gen_gif_notificacion(tit, msg_body, color_neon)
+                # Buscamos la imagen del mapa de forma asíncrona directamente desde la API oficial de Valorant
+                map_url = await get_map_splash(mapa)
+                
+                # Preparamos el diccionario de estadísticas que la función gráfica necesita
+                stats_dict = {
+                    "won": won,
+                    "mapa": mapa,
+                    "modo": modo_formateado,
+                    "agente": agente,
+                    "k": k, "d": d, "a": a,
+                    "acs": acs,
+                    "adr": tracker_metrics["adr"],
+                    "kast": tracker_metrics["kast"],
+                    "hs": hs_val,
+                    "map_url": map_url  # Pasamos la URL correcta en el diccionario
+                }
+                
+                # Enviamos a dibujar a un hilo separado para que Discord no se bloquee descargando la imagen
+                buf_alert = await asyncio.to_thread(gen_gif_notificacion, tit, stats_dict)
                 await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.gif"))
                 print(f"✅ Alerta GIF visual de {nombre}#{tag} enviada correctamente a Discord.")
                 
         except Exception as e:
             print(f"❌ Error procesando a {j['nombre']}#{j['tag']}: {e}")
+
+    # Ejecutamos las llamadas asíncronas de todos los jugadores de tu base de datos de manera concurrente
+    await asyncio.gather(*(procesar_jugador(j) for j in jugadores))
 
 @tasks.loop(hours=1)
 async def resumen_semanal():
