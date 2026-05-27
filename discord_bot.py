@@ -202,24 +202,27 @@ def gen_gif_notificacion(titulo, stats_dict):
     W, H = 880, 240
     frames, frame_durations = [], []
 
-    resultado_txt = "VICTORIA" if stats_dict.get("won") else "DERROTA"
     won = stats_dict.get("won")
+    racha = stats_dict.get("racha", 0)
     
-    # Lógica de colores de parpadeo Valorant
-    if won:
-        # Victoria: Parpadeo entre Verde Táctico y Blanco Roto
-        c1 = (0, 220, 100) # Verde táctico brillante
+    # Lógica de colores Valorant
+    if racha >= 3:
+        resultado_txt = f"VICTORIA x{racha}"
+        c1 = (255, 215, 0) # Dorado
         c2 = VALORANT_OFFWHITE
+    elif racha <= -3:
+        resultado_txt = f"DERROTA x{abs(racha)}"
+        c1 = (139, 0, 0) # Sangre
+        c2 = VALORANT_RED
     else:
-        # Derrota: Parpadeo entre Rojo Valorant y Naranja de Advertencia
-        c1 = VALORANT_RED
-        c2 = (255, 120, 40) # Naranja alerta
+        resultado_txt = "VICTORIA" if won else "DERROTA"
+        c1 = (0, 220, 100) if won else VALORANT_RED
+        c2 = VALORANT_OFFWHITE if won else (255, 120, 40)
 
     map_url = stats_dict.get("map_url")
     nombre = titulo.split("#")[0] if "#" in titulo else titulo
     tag = titulo.split("#")[1] if "#" in titulo else ""
 
-    # Fondo base táctico (Glassmorphism aplicado)
     base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
     
     if map_url:
@@ -233,7 +236,6 @@ def gen_gif_notificacion(titulo, stats_dict):
         except Exception as e:
             print(f"Error cargando splash art: {e}")
 
-    # Secuencia estroboscópica mantenida
     alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
 
     for i, alpha in enumerate(alphas):
@@ -244,7 +246,6 @@ def gen_gif_notificacion(titulo, stats_dict):
         draw.rectangle([1, 1, W-2, H-2], outline=(*VALORANT_RED, alpha), width=1)
 
         # 1. Borde de Neón VIAJERO Geométrico
-        # (Sustituye la lógica de círculos por líneas geométricas)
         offset_w = (i * 45) % W
         offset_h = (i * 45) % H
         draw.line([(offset_w, 1), (offset_w + 150, 1)], fill=(*c1, 255), width=3)
@@ -253,17 +254,21 @@ def gen_gif_notificacion(titulo, stats_dict):
         draw.line([(W-2, offset_h), (W-2, offset_h + 150)], fill=(*c1, 255), width=3)
 
         # 2. TEXTO VICTORIA/DERROTA (Fuente Brutalista HUECA)
-        f_titulo = _vct_title(90)
-        col_parpadeo = mix(c1, c2, (math.sin(i * 1.5) + 1) / 2)
-        draw.text((40, 40), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*col_parpadeo, alpha))
+        f_titulo = _vct_title(80)
+        
+        # EL FALLO ESTABA AQUÍ. Corregido a _math.sin
+        mix_factor = (_math.sin(i * 1.5) + 1) / 2
+        col_parpadeo = mix(c1, c2, mix_factor)
+        
+        draw.text((40, 35), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*col_parpadeo, alpha))
 
-        # 3. NOMBRE Y MODO/MAPA (Centrado y Enormes)
-        draw.text((W//2, 145), nombre.upper(), font=_vct_title(54), fill=VALORANT_OFFWHITE, anchor="mm")
+        # 3. NOMBRE Y MODO/MAPA (Movido hacia abajo para que NO choque con los números)
+        draw.text((40, 140), nombre.upper(), font=_vct_title(54), fill=VALORANT_OFFWHITE)
         if tag:
-            draw.text((W//2, 195), f"#{tag}  ///  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(22), fill=_MUTED_G, anchor="mm")
+            draw.text((40, 195), f"#{tag}  ///  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(22), fill=_MUTED_G)
 
-        # 4. PANEL DERECHO DE ESTADÍSTICAS (Mantenido)
-        stats_x = W - 320
+        # 4. PANEL DERECHO DE ESTADÍSTICAS (Posición fija en X=550)
+        stats_x = 550
         draw.line([(stats_x - 30, 40), (stats_x - 30, H - 40)], fill=(255,255,255,30), width=2)
         draw.text((stats_x, 45), "K / D / A", font=_bc_m(18), fill=_MUTED_G)
         draw.text((stats_x + 160, 45), "ACS", font=_bc_m(18), fill=_MUTED_G)
