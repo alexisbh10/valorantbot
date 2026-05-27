@@ -350,38 +350,50 @@ def obtener_stats(username, tag, region="eu"):
     modo         = (last_match.get("metadata") or {}).get("mode", "Desconocido")
     match_id     = (last_match.get("metadata") or {}).get("matchid", "")
 
-    last_match_info = {}
-    if last_match:
-        players = last_match.get("players", {}).get("all_players", [])
-        p = find_player(players, puuid, username, tag)
-        if p:
-            try:
-                s             = p.get("stats", {}) or {}
-                match_metrics = extract_tracker_like_match_metrics(last_match, p)
-                won           = get_team_win(last_match, p)
-                hs_last       = s.get("headshots", 0) or 0
-                bs_last       = s.get("bodyshots",  0) or 0
-                ls_last       = s.get("legshots",   0) or 0
-                total_shots_last = hs_last + bs_last + ls_last
-                last_match_info = {
-                    "id":                   match_id,
-                    "kills":                s.get("kills",   0),
-                    "deaths":               s.get("deaths",  1),
-                    "assists":              s.get("assists", 0),
-                    "acs":                  match_metrics["acs"],
-                    "won":                  won,
-                    "agente":               p.get("character", "Desconocido"),
-                    "rounds_played":        match_metrics["rounds_played"],
-                    "damage_dealt_total":   match_metrics["damage_dealt_total"],
-                    "damage_received_total":match_metrics["damage_received_total"],
-                    "kast_rounds":          match_metrics["kast_rounds"],
-                    "adr":                  match_metrics["adr"],
-                    "dda":                  match_metrics["dda"],
-                    "kast":                 match_metrics["kast"],
-                    "hs":                   round((hs_last / max(total_shots_last, 1)) * 100, 2),
-                }
-            except Exception as e:
-                print(f"[last_match_info ERROR] {e}\n{traceback.format_exc()}")
+    recent_matches_info = []
+    
+    for m in matches:
+        try:
+            m_id = (m.get("metadata") or {}).get("matchid", "")
+            m_mapa = (m.get("metadata") or {}).get("map", "Desconocido")
+            m_modo = (m.get("metadata") or {}).get("mode", "Desconocido")
+            players = m.get("players", {}).get("all_players", [])
+            p = find_player(players, puuid, username, tag)
+            
+            if p:
+                s_player = p.get("stats", {}) or {}
+                match_metrics = extract_tracker_like_match_metrics(m, p)
+                won = get_team_win(m, p)
+                
+                hs_m = s_player.get("headshots", 0) or 0
+                bs_m = s_player.get("bodyshots", 0) or 0
+                ls_m = s_player.get("legshots", 0) or 0
+                total_shots_m = hs_m + bs_m + ls_m
+                
+                recent_matches_info.append({
+                    "id": m_id,
+                    "mapa": m_mapa,
+                    "modo": m_modo,
+                    "kills": s_player.get("kills", 0),
+                    "deaths": s_player.get("deaths", 1),
+                    "assists": s_player.get("assists", 0),
+                    "acs": match_metrics["acs"],
+                    "won": won,
+                    "agente": p.get("character", "Desconocido"),
+                    "rounds_played": match_metrics["rounds_played"],
+                    "damage_dealt_total": match_metrics["damage_dealt_total"],
+                    "damage_received_total": match_metrics["damage_received_total"],
+                    "kast_rounds": match_metrics["kast_rounds"],
+                    "adr": match_metrics["adr"],
+                    "dda": match_metrics["dda"],
+                    "kast": match_metrics["kast"],
+                    "hs": round((hs_m / max(total_shots_m, 1)) * 100, 2)
+                })
+        except Exception as e:
+            print(f"[recent_matches ERROR] {e}\n{traceback.format_exc()}")
+
+    # Mantenemos last_match_info para no romper los demás comandos (ej: !stats)
+    last_match_info = recent_matches_info[0] if recent_matches_info else {}
 
     analysis = analyze_matches(matches, puuid, username, tag)
     is_smurf = (
@@ -414,6 +426,7 @@ def obtener_stats(username, tag, region="eu"):
         "trend":                 analysis["trend"],
         "smurf":                 is_smurf,
         "last_match":            last_match_info,
+        "recent_matches":        recent_matches_info,
         "agent":                 analysis.get("agent",      "Desconocido"),
         "top_agents":            analysis.get("top_agents", []),
     }
