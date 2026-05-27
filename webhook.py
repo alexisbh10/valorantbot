@@ -34,7 +34,7 @@ async def get_db():
 def get_cache(k):
     if k in cache:
         data, ts = cache[k]
-        if time.time() - ts < 300:
+        if time.time() - ts < 60:
             return data
     return None
 
