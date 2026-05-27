@@ -163,54 +163,87 @@ def gen_banner_notificacion(titulo, mensaje, color_neon=_TEAL):
     buf.seek(0)
     return buf
 
-def gen_gif_notificacion(titulo, mensaje, color_neon=_TEAL):
-    W, H = 680, 210
-    frames = []
-    
-    # Extraemos los datos básicos del mensaje
-    # Formato: "{resultado} en {mapa} ({modo}) con {agente}. KDA: {k}/{d}/{a} | ACS: {acs}"
-    resultado_txt = "VICTORIA" if "VICTORIA" in mensaje else "DERROTA"
-    detalles = mensaje.split(". KDA: ")[0]
-    mapa_txt = detalles.split(" en ")[1].split(" (")[0]
-    stats_txt = mensaje.split(". KDA: ")[1] # "18/12/4 | ACS: 240"
-    
-    # 1. Cargar fondo del mapa
-    mapa_img = None
-    if mapa_txt in MAP_SPLASHES:
+# ==============================================================================
+# NUEVO MOTOR: HUD DE PARTIDA (TEXTO HUECO, NEÓN 1PX, ESTROBOSCÓPICO)
+# ==============================================================================
+def gen_gif_notificacion(titulo, stats_dict):
+    W, H = 880, 240
+    frames, frame_durations = [], []
+
+    resultado_txt = "VICTORIA" if stats_dict.get("won") else "DERROTA"
+    color_neon = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G
+    mapa_txt = stats_dict.get("mapa", "Desconocido")
+
+    nombre = titulo.split("#")[0] if "#" in titulo else titulo
+    tag = titulo.split("#")[1] if "#" in titulo else ""
+
+    # Fondo base muy oscuro para simular interfaz táctica
+    base_bg = Image.new("RGBA", (W, H), (10, 11, 15, 255))
+    if MAP_SPLASHES.get(mapa_txt):
         try:
-            mapa_img = Image.open(io.BytesIO(requests.get(MAP_SPLASHES[mapa_txt], timeout=5).content)).convert("RGBA")
-            mapa_img = mapa_img.resize((W, H), Image.Resampling.LANCZOS)
-            mapa_img = ImageEnhance.Brightness(mapa_img).enhance(0.15) # Fondo muy oscuro
+            bg_map = Image.open(io.BytesIO(requests.get(MAP_SPLASHES[mapa_txt], timeout=5).content)).convert("RGBA")
+            bg_map = bg_map.resize((W, H), Image.Resampling.LANCZOS)
+            # Oscurecemos masivamente el mapa para que sea un ligero detalle de fondo
+            bg_map = ImageEnhance.Brightness(bg_map).enhance(0.18)
+            base_bg.paste(bg_map, (0,0), bg_map)
         except: pass
 
-    # 2. Definir colores
-    color_neon = _GREEN_G if resultado_txt == "VICTORIA" else _RED_G if resultado_txt == "DERROTA" else _TEAL
+    # Secuencia estroboscópica: ON, OFF, ON, OFF, ON fijo + pulso suave
+    alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
 
-    # 3. Generar fotogramas para el efecto de doble destello rápido
-    # 8 frames: 2 frames de brillo, 2 de apagado, 2 de brillo, 10 de espera (reposo)
-    secuencia = [255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    
-    for f in range(16):
-        frame = Image.new("RGBA", (W, H), (0, 0, 0, 255))
-        if mapa_img: frame.paste(mapa_img, (0, 0))
+    for i, alpha in enumerate(alphas):
+        frame = base_bg.copy()
         draw = ImageDraw.Draw(frame)
+
+        # BORDE DE NEÓN DINÁMICO (Borde grueso difuminado debajo, y borde de 1px brillante encima)
+        if alpha > 0:
+            draw.rectangle([1, 1, W-2, H-2], outline=(*color_neon, int(alpha*0.3)), width=4)
+            draw.rectangle([0, 0, W-1, H-1], outline=(*color_neon, alpha), width=1)
+
+        # TEXTO DE RESULTADO HUECO
+        f_titulo = _bc_eb(90)
+        # fill transparente y stroke de color neón = texto vaciado
+        draw.text((40, 50), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=2, stroke_fill=(*color_neon, alpha))
+
+        # PANEL CENTRAL: JUGADOR Y MAPA
+        w_vic = draw.textlength(resultado_txt, font=f_titulo)
+        x_nombre = 40 + w_vic + 30
+        draw.text((x_nombre, 70), nombre.upper(), font=_bc_eb(45), fill=_TEXT_G)
+        if tag:
+            draw.text((x_nombre, 120), f"#{tag}  //  {stats_dict.get('modo', 'COMPETITIVO').upper()}", font=_bc_m(22), fill=_MUTED_G)
+
+        # PANEL DERECHO: CUADRÍCULA DE ESTADÍSTICAS PURA
+        stats_x = W - 320
+        # Línea divisoria principal
+        draw.line([(stats_x - 30, 40), (stats_x - 30, H - 40)], fill=(255,255,255,30), width=2)
+
+        # Fila 1 de Stats
+        draw.text((stats_x, 45), "K / D / A", font=_bc_m(18), fill=_MUTED_G)
+        draw.text((stats_x + 160, 45), "ACS", font=_bc_m(18), fill=_MUTED_G)
+        kda_val = f"{stats_dict.get('k',0)}/{stats_dict.get('d',0)}/{stats_dict.get('a',0)}"
+        draw.text((stats_x, 65), kda_val, font=_bc_eb(40), fill=_TEXT_G)
+        draw.text((stats_x + 160, 65), str(stats_dict.get('acs', 0)), font=_bc_eb(40), fill=_GOLD)
+
+        # Separador interno
+        draw.line([(stats_x, 130), (W - 40, 130)], fill=(255,255,255,20), width=1)
+
+        # Fila 2 de Stats
+        draw.text((stats_x, 145), "ADR", font=_bc_m(18), fill=_MUTED_G)
+        draw.text((stats_x + 100, 145), "KAST", font=_bc_m(18), fill=_MUTED_G)
+        draw.text((stats_x + 200, 145), "HS%", font=_bc_m(18), fill=_MUTED_G)
         
-        # Borde exterior de 1 píxel estilo neón
-        _rr2(draw, 1, 1, W-2, H-2, r=0, fill=None, outline=(*color_neon, secuencia[f]), w=1)
-        
-        # Texto VICTORIA/DERROTA HUECO (stroke_width=1, fill=(0,0,0,0))
-        fuente_titulo = _bc_eb(80)
-        draw.text((30, 20), resultado_txt, font=fuente_titulo, 
-                  fill=(0,0,0,0), stroke_width=2, stroke_fill=(*color_neon, secuencia[f]))
-        
-        # Nombre del jugador y Stats
-        draw.text((30, 110), titulo.replace("🎮 NUEVA PARTIDA DE ", ""), font=_bc_m(22), fill=_TEXT_G)
-        draw.text((30, 140), stats_txt, font=_bc_b(24), fill=_GOLD)
-        
-        frames.append(frame.convert("P", palette=Image.Palette.ADAPTIVE))
+        draw.text((stats_x, 165), str(stats_dict.get('adr', 0) if stats_dict.get('adr') is not None else 0), font=_bc_eb(30), fill=_TEXT_G)
+        kast_v = f"{stats_dict.get('kast', 0)}%" if stats_dict.get('kast') is not None else "N/A"
+        draw.text((stats_x + 100, 165), kast_v, font=_bc_eb(30), fill=_TEXT_G)
+        draw.text((stats_x + 200, 165), f"{stats_dict.get('hs', 0)}%", font=_bc_eb(30), fill=_TEAL)
+
+        frames.append(frame)
+        # ACELERACIÓN DE FRAMES PARA EL PARPADEO (50ms en los destellos, 80ms en reposo)
+        frame_durations.append(50 if i < 4 else 80)
 
     buf = io.BytesIO()
-    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+    # Guardamos los frames generados como secuencia GIF asíncrona
+    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=frame_durations, loop=0, optimize=False)
     buf.seek(0)
     return buf
 
