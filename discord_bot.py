@@ -242,15 +242,14 @@ def gen_gif_notificacion(titulo, stats_dict):
             # 2. Creamos la capa del degradado (Horizontal: de Izquierda a Derecha)
             gradient = Image.new('RGBA', (W, 1))
             
-            # c1 es tu color dinámico (Verde victoria, Rojo derrota o Dorado racha)
-            # A la izquierda (x=0): Color intenso con 70% de opacidad (180 de 255)
-            color_izq = (*c1, 180) 
-            # A la derecha (x=W): Negro/Azul muy oscuro casi opaco para leer bien las stats
-            color_der = (8, 9, 13, 245) 
+            # Bajamos la intensidad brutalmente (de 180 a 70) para que el mapa respire
+            color_izq = (*c1, 70) 
+            color_der = (8, 9, 13, 255) 
             
             # Calculamos la transición de color pixel a pixel
             for x in range(W):
-                t = x / max(W - 1, 1)
+                # Le ponemos un exponente (** 1.5) para que el negro gane terreno más rápido
+                t = (x / max(W - 1, 1)) ** 1.5  
                 r_grad = int(color_izq[0] * (1 - t) + color_der[0] * t)
                 g_grad = int(color_izq[1] * (1 - t) + color_der[1] * t)
                 b_grad = int(color_izq[2] * (1 - t) + color_der[2] * t)
@@ -353,7 +352,7 @@ def gen_gif_notificacion(titulo, stats_dict):
         draw.text((stats_x + 100, 165), kast_v, font=_bc_eb(30), fill=_TEXT_G)
         draw.text((stats_x + 200, 165), f"{stats_dict.get('hs', 0)}%", font=_bc_eb(30), fill=_TEAL)
 
-        frames.append(frame.convert("P", palette=Image.ADAPTIVE))
+        frames.append(frame.convert("P", palette=Image.ADAPTIVE, dither=Image.FLOYDSTEINBERG))
         frame_durations.append(50 if i < 4 else 80)
 
     buf = io.BytesIO()
