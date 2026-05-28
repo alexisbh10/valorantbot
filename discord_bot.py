@@ -299,7 +299,7 @@ def gen_gif_notificacion(titulo, stats_dict):
 
         # 2. TEXTO VICTORIA/DERROTA
         try:
-            ruta_img = "assets/images/victoria.png" if won else "assets/images/derrota.png"
+            ruta_img = "assets/images/VICTORIA.png" if won else "assets/images/DERROTA.png"
             img_core = Image.open(ruta_img).convert("RGBA")
             
             # 1. Creamos la capa de luz desenfocando tu propia imagen
