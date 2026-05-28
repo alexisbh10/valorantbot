@@ -10,7 +10,7 @@ import asyncpg
 import io
 import math as _math
 from collections import Counter
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImagePalette
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImagePalette, ImageFilter
 from dotenv import load_dotenv
 from google import genai
 
@@ -235,36 +235,101 @@ def gen_gif_notificacion(titulo, stats_dict):
             response = requests.get(map_url, headers=headers, timeout=5)
             bg_map = Image.open(io.BytesIO(response.content)).convert("RGBA")
             bg_map = bg_map.resize((W, H), Image.Resampling.LANCZOS)
-            bg_map = ImageEnhance.Brightness(bg_map).enhance(0.18)
+            
+            # 1. Pegamos el mapa con sus colores originales (sin el filtro gris oscuro)
             base_bg.paste(bg_map, (0,0), bg_map)
+            
+            # 2. Creamos la capa del degradado (Horizontal: de Izquierda a Derecha)
+            gradient = Image.new('RGBA', (W, 1))
+            
+            # c1 es tu color dinámico (Verde victoria, Rojo derrota o Dorado racha)
+            # A la izquierda (x=0): Color intenso con 70% de opacidad (180 de 255)
+            color_izq = (*c1, 180) 
+            # A la derecha (x=W): Negro/Azul muy oscuro casi opaco para leer bien las stats
+            color_der = (8, 9, 13, 245) 
+            
+            # Calculamos la transición de color pixel a pixel
+            for x in range(W):
+                t = x / max(W - 1, 1)
+                r_grad = int(color_izq[0] * (1 - t) + color_der[0] * t)
+                g_grad = int(color_izq[1] * (1 - t) + color_der[1] * t)
+                b_grad = int(color_izq[2] * (1 - t) + color_der[2] * t)
+                a_grad = int(color_izq[3] * (1 - t) + color_der[3] * t)
+                gradient.putpixel((x, 0), (r_grad, g_grad, b_grad, a_grad))
+                
+            # Estiramos esa línea de 1 píxel de alto para cubrir toda la imagen
+            gradient = gradient.resize((W, H))
+            
+            # 3. Fusionamos el mapa original con nuestra nueva capa de degradado
+            base_bg = Image.alpha_composite(base_bg, gradient)
+            
         except Exception as e:
             print(f"Error cargando splash art: {e}")
+
+    llamas_frames = []
+    if abs(racha) >= 3:
+        try:
+            gif_llamas = Image.open("llamas.gif")
+            # Extraemos todos los fotogramas del GIF de fuego
+            for f in range(getattr(gif_llamas, "n_frames", 1)):
+                gif_llamas.seek(f)
+                # Convertimos a escala de grises (L). El negro se vuelve invisible, el blanco opaco.
+                mask = gif_llamas.convert("L").resize((W, H), Image.Resampling.LANCZOS)
+                llamas_frames.append(mask)
+        except Exception as e:
+            print(f"⚠️ No se encontró llamas.gif o hubo un error: {e}")
 
     alphas = [255, 0, 255, 0, 255] + [int(200 + 55 * _math.sin(i * 0.3)) for i in range(25)]
 
     for i, alpha in enumerate(alphas):
         frame = base_bg.copy()
+        
+        # --- 1. PINTAR LLAMAS DE FONDO (Si aplica) ---
+        if llamas_frames:
+            # Seleccionamos el fotograma del fuego que toca en este instante
+            mask_llama = llamas_frames[i % len(llamas_frames)]
+            
+            # Creamos una capa sólida del color de tu racha (Dorado o Rojo) 
+            # con transparencia (ej: 130 de 255) para que no tape el mapa
+            capa_llamas = Image.new("RGBA", (W, H), (*c1, 130))
+            
+            # Pegamos ese color usando el fuego como plantilla
+            frame.paste(capa_llamas, (0, 0), mask_llama)
+
         draw = ImageDraw.Draw(frame)
-        
-        # 0. Acento Crítico: Borde interior Rojo Valorant de 1px
-        draw.rectangle([1, 1, W-2, H-2], outline=(*VALORANT_RED, alpha), width=1)
 
-        # 1. Borde de Neón VIAJERO Geométrico
-        offset_w = (i * 45) % W
-        offset_h = (i * 45) % H
-        draw.line([(offset_w, 1), (offset_w + 150, 1)], fill=(*c1, 255), width=3)
-        draw.line([(W - offset_w, H-2), (W - offset_w - 150, H-2)], fill=(*c1, 255), width=3)
-        draw.line([(1, H - offset_h), (1, H - offset_h - 150)], fill=(*c1, 255), width=3)
-        draw.line([(W-2, offset_h), (W-2, offset_h + 150)], fill=(*c1, 255), width=3)
-
-        # 2. TEXTO VICTORIA/DERROTA (Fuente Brutalista HUECA)
-        f_titulo = _vct_title(80)
-        
-        # EL FALLO ESTABA AQUÍ. Corregido a _math.sin
-        mix_factor = (_math.sin(i * 1.5) + 1) / 2
-        col_parpadeo = mix(c1, c2, mix_factor)
-        
-        draw.text((40, 35), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*col_parpadeo, alpha))
+        # 2. TEXTO VICTORIA/DERROTA
+        try:
+            ruta_img = "assets/images/victoria.png" if won else "assets/images/derrota.png"
+            img_core = Image.open(ruta_img).convert("RGBA")
+            
+            # 1. Creamos la capa de luz desenfocando tu propia imagen
+            img_glow = img_core.filter(ImageFilter.GaussianBlur(radius=8))
+            
+            # 2. Aplicamos el parpadeo (alpha) a la luz
+            r_g, g_g, b_g, a_g = img_glow.split()
+            a_g = a_g.point(lambda p: int(p * (alpha / 255.0)))
+            img_glow_parpadeante = Image.merge("RGBA", (r_g, g_g, b_g, a_g))
+            
+            # 3. Aplicamos el parpadeo a tu imagen nítida
+            r_c, g_c, b_c, a_c = img_core.split()
+            a_c = a_c.point(lambda p: int(p * (alpha / 255.0)))
+            img_core_parpadeante = Image.merge("RGBA", (r_c, g_c, b_c, a_c))
+            
+            # 4. Estampamos todo en el frame (Coordenadas X=40, Y=25)
+            # Pegamos el glow dos veces para que la luz sea mucho más intensa y sature bien
+            frame.paste(img_glow_parpadeante, (40, 25), img_glow_parpadeante)
+            frame.paste(img_glow_parpadeante, (40, 25), img_glow_parpadeante)
+            
+            # Pegamos tu diseño original (el tubo del neón) por delante
+            frame.paste(img_core_parpadeante, (40, 25), img_core_parpadeante)
+            
+        except Exception as e:
+            # Fallback de seguridad por si no encuentra tus archivos PNG
+            f_titulo = _vct_title(80)
+            mix_factor = (_math.sin(i * 1.5) + 1) / 2
+            col_parpadeo = mix(c1, c2, mix_factor)
+            draw.text((40, 35), resultado_txt, font=f_titulo, fill=(0,0,0,0), stroke_width=3, stroke_fill=(*col_parpadeo, alpha))
 
         # 3. NOMBRE Y MODO/MAPA (Movido hacia abajo para que NO choque con los números)
         draw.text((40, 140), nombre.upper(), font=_vct_title(54), fill=VALORANT_OFFWHITE)
