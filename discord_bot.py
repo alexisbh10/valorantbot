@@ -239,27 +239,27 @@ def gen_gif_notificacion(titulo, stats_dict):
             # 1. Pegamos el mapa con sus colores originales (sin el filtro gris oscuro)
             base_bg.paste(bg_map, (0,0), bg_map)
             
-            # 2. Creamos la capa del degradado (Horizontal: de Izquierda a Derecha)
+            # 2. Creamos la capa del degradado (De Negro a Color sutil)
             gradient = Image.new('RGBA', (W, 1))
             
-            # Bajamos la intensidad brutalmente (de 180 a 70) para que el mapa respire
-            color_izq = (*c1, 70) 
-            color_der = (8, 9, 13, 255) 
+            # Izquierda (x=0): Negro casi opaco para que resalte tu diseño de Canva
+            color_izq = (8, 9, 13, 250) 
             
-            # Calculamos la transición de color pixel a pixel
+            # Derecha (x=W): Color de victoria/derrota (c1) pero MUY suave (40 de 255)
+            color_der = (*c1, 40) 
+            
+            # Calculamos la transición
             for x in range(W):
-                # Le ponemos un exponente (** 1.5) para que el negro gane terreno más rápido
-                t = (x / max(W - 1, 1)) ** 1.5  
+                # Usamos t al cuadrado para que el negro ocupe más espacio y el color entre suavemente al final
+                t = (x / max(W - 1, 1)) ** 2  
+                
                 r_grad = int(color_izq[0] * (1 - t) + color_der[0] * t)
                 g_grad = int(color_izq[1] * (1 - t) + color_der[1] * t)
                 b_grad = int(color_izq[2] * (1 - t) + color_der[2] * t)
                 a_grad = int(color_izq[3] * (1 - t) + color_der[3] * t)
                 gradient.putpixel((x, 0), (r_grad, g_grad, b_grad, a_grad))
                 
-            # Estiramos esa línea de 1 píxel de alto para cubrir toda la imagen
             gradient = gradient.resize((W, H))
-            
-            # 3. Fusionamos el mapa original con nuestra nueva capa de degradado
             base_bg = Image.alpha_composite(base_bg, gradient)
             
         except Exception as e:
