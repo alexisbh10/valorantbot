@@ -269,7 +269,7 @@ def gen_gif_notificacion(titulo, stats_dict):
     llamas_frames = []
     if abs(racha) >= 3:
         try:
-            gif_llamas = Image.open("llamas.gif")
+            gif_llamas = Image.open("assets/images/llamas.gif")
             # Extraemos todos los fotogramas del GIF de fuego
             for f in range(getattr(gif_llamas, "n_frames", 1)):
                 gif_llamas.seek(f)
