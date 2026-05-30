@@ -1151,7 +1151,7 @@ class StatsInteractiveHub(discord.ui.View):
         prompt = f"Actúa como un entrenador de eSports de Valorant muy sarcástico. Analiza la última partida de {self.nombre}: Agente: {last['agente']}, Resultado: {'Victoria' if last['won'] else 'Derrota'}, KDA: {last['kills']}/{last['deaths']}/{last['assists']}, ACS: {last['acs']}. Haz un roasteo lapidario de 1 línea."
         try:
             client = genai.Client(api_key=GEMINI_API_KEY.strip())
-            response = await asyncio.to_thread(client.models.generate_content, model='gemini-2.5-flash', contents=prompt)
+            response = await asyncio.to_thread(client.models.generate_content, model='gemini-1.5-flash', contents=prompt)
             buf = gen_banner_notificacion(f"🤖 ROAST IA PARA {self.nombre.upper()}", response.text.strip(), _PURPLE)
             await interaction.followup.send(file=discord.File(fp=buf, filename="coach.png"), ephemeral=True)
         except Exception as e:
