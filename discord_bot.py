@@ -1308,24 +1308,28 @@ async def vigilante_partidas():
                         if es_primera_vez:
                             print(f"🤫 Primera partida de {nombre}#{tag} registrada como punto de control.")
                         else:
-                            racha_num, racha_tipo = await _check_racha(nombre, tag)
-                            nuevo_rango = s.get("rank")
-                            await _check_rango(nombre, tag, nuevo_rango, canal)
+                            # --- FILTRO DE MODOS: Solo avisa si es Competitive o Unrated ---
+                            if modo_formateado.lower() in ["competitive", "unrated"]:
+                                racha_num, racha_tipo = await _check_racha(nombre, tag)
+                                nuevo_rango = s.get("rank")
+                                await _check_rango(nombre, tag, nuevo_rango, canal)
 
-                            tit = f"{nombre.upper()}#{tag.upper()}"
-                            map_url = await get_map_splash(mapa)
-                            
-                            stats_dict = {
-                                "won": won, "mapa": mapa, "modo": modo_formateado, "agente": agente,
-                                "k": k, "d": d, "a": a, "acs": acs, "adr": adr_val, "kast": kast_val, "hs": hs_val,
-                                "map_url": map_url, "racha": racha_num if racha_tipo == "W" else (racha_num * -1)
-                            }
-                            
-                            buf_alert = await asyncio.to_thread(gen_gif_notificacion, tit, stats_dict)
-                            await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.gif"))
-                            print(f"✅ Alerta GIF visual de {nombre}#{tag} enviada correctamente a Discord (Partida: {match_id}).")
-                            
-                            await asyncio.sleep(2)
+                                tit = f"{nombre.upper()}#{tag.upper()}"
+                                map_url = await get_map_splash(mapa)
+                                
+                                stats_dict = {
+                                    "won": won, "mapa": mapa, "modo": modo_formateado, "agente": agente,
+                                    "k": k, "d": d, "a": a, "acs": acs, "adr": adr_val, "kast": kast_val, "hs": hs_val,
+                                    "map_url": map_url, "racha": racha_num if racha_tipo == "W" else (racha_num * -1)
+                                }
+                                
+                                buf_alert = await asyncio.to_thread(gen_gif_notificacion, tit, stats_dict)
+                                await canal.send(file=discord.File(fp=buf_alert, filename="match_alert.gif"))
+                                print(f"✅ Alerta GIF de {nombre}#{tag} enviada a Discord (Partida: {match_id}).")
+                                
+                                await asyncio.sleep(2)
+                            else:
+                                print(f"🙈 Partida de {nombre}#{tag} guardada en silencio (Modo: {modo_formateado}).")
                             
                 except Exception as e_inner:
                     # SI EL GIF FALLA, AVISAMOS PERO EL BUCLE CONTINÚA CON LA SIGUIENTE PARTIDA
